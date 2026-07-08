@@ -144,6 +144,33 @@ Before calling HolmesGPT, AlertLens should attach cheap deterministic context wh
 
 This is useful only when bounded. The project should prefer small fixed context over broad collection.
 
+## Private Runbook Fetching
+
+AlertLens may need to fetch private runbooks from GitHub before asking HolmesGPT.
+
+Unlike Vigil, AlertLens does not need a token sidecar in the MVP. Vigil isolated GitHub App credentials because its main process included an agent/tool-execution path. AlertLens should not have that path: no arbitrary shell, no autonomous remediation agent, and no user-defined code execution. With that boundary, the main process can safely mint short-lived GitHub App installation tokens from a Kubernetes Secret.
+
+Recommended flow:
+
+```text
+AlertLens main process
+  -> load GitHub App private key from Kubernetes Secret
+  -> mint short-lived installation token
+  -> fetch allowlisted repo/path runbook
+  -> pass bounded sanitized runbook excerpt to HolmesGPT
+```
+
+Rules:
+
+- Only fetch from configured owners/repos.
+- Only fetch allowed path prefixes, for example `runbooks/` or `docs/runbooks/`.
+- Never log tokens or include them in metrics, prompts, or Slack output.
+- Cache installation tokens until shortly before expiry.
+- Cap runbook content length before adding it to HolmesGPT context.
+- Runbook fetch failures should degrade RCA quality, not block alert handling.
+
+Add a sidecar only if AlertLens later gains untrusted execution in the main process, such as arbitrary shell, user plugins, or an agent that can choose its own repo/path reads.
+
 ## Watchdog
 
 Alertmanager Watchdog should be treated as pipeline health, not an incident.
