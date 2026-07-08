@@ -1,0 +1,292 @@
+# AlertLens Product Design
+
+Date: 2026-07-08
+
+## Summary
+
+AlertLens is a small no-UI service for Alertmanager-driven RCA in Slack.
+
+It should not become another broad SRE agent. The core product is:
+
+```text
+Alertmanager -> Slack       # existing authoritative alert delivery
+Alertmanager -> AlertLens   # side-path webhook for structured alert payloads
+AlertLens    -> Slack       # RCA and follow-ups inside alert threads
+```
+
+If AlertLens is down, alerts still reach Slack through the mature Alertmanager integration. The worst case is losing RCA, not losing alert delivery.
+
+## Product Boundary
+
+AlertLens keeps:
+
+- Alertmanager webhook ingestion.
+- Slack Events listener for Alertmanager bot messages and `@AlertLens` mentions.
+- Slack Web API replies into threads.
+- HolmesGPT RCA calls.
+- Small external state for alert/thread mapping.
+- Deterministic enrichment before RCA.
+- Watchdog heartbeat metrics.
+- Optional declarative scheduled checks.
+
+AlertLens does not include:
+
+- A web UI.
+- GitOps remediation.
+- PR creation.
+- ArgoCD-specific notification handling.
+- A general autonomous agent.
+- Arbitrary shell command execution.
+- Slack commands that create or mutate scheduled jobs at runtime.
+
+## Why Not Replace Alertmanager -> Slack
+
+Alertmanager's direct Slack integration is the reliable notification path. Replacing it with AlertLens would make AlertLens part of the critical alert delivery chain:
+
+```text
+Alertmanager -> AlertLens -> Slack
+```
+
+That is not acceptable for the first version. If AlertLens fails, operators must still see the alert.
+
+The preferred shape is side-path enhancement:
+
+```text
+Alertmanager -> Slack
+        \-> AlertLens
+```
+
+AlertLens can fail independently. Alertmanager remains the source of notification truth.
+
+## Slack Thread Mapping
+
+AlertLens needs to post RCA into the same Slack thread as the original Alertmanager alert.
+
+Recommended flow:
+
+1. Alertmanager posts a short alert message to Slack.
+2. AlertLens receives the Slack bot message through Slack Events.
+3. AlertLens extracts a stable fingerprint or group key from the message marker.
+4. AlertLens stores:
+
+```text
+alert key -> Slack channel + parent ts/thread ts + status + last seen time
+```
+
+5. AlertLens receives the structured Alertmanager webhook payload.
+6. AlertLens uses the stored mapping to reply in the existing thread.
+
+If the mapping is missing, AlertLens should either post a short fallback message or skip Slack output and record a metric. It should not create noisy duplicate incident messages by default.
+
+## High Availability
+
+Active-active AlertLens needs external state if thread continuity matters.
+
+Minimum state:
+
+```text
+groupKey/fingerprint -> Slack channel + thread_ts + last status + last sent time
+```
+
+Recommended stores:
+
+- Redis for simple TTL-backed mappings.
+- Postgres if the project later needs durable incident history and querying.
+
+No external store means AlertLens can still run stateless, but it cannot guarantee that repeated/resolved alerts return to the original Slack thread after restart or across replicas.
+
+## Slack Noise Policy
+
+The Slack channel should stay readable.
+
+Channel parent message:
+
+```text
+[critical] PodCrashLooping prod/api - RCA running in thread
+```
+
+Thread replies:
+
+- Compact alert facts.
+- HolmesGPT RCA.
+- Follow-up answers.
+- Resolved summary.
+
+Hard limits:
+
+- RCA output should be bounded, for example 1500-2500 characters.
+- Long results should become a concise summary with truncation noted.
+- Automatic RCA should be controlled by labels such as severity, team, namespace, or route.
+- Warning-level alerts can be thread-only, rate-limited, or ignored depending on policy.
+
+## HolmesGPT Policy
+
+HolmesGPT is the RCA engine, not an autonomous remediation agent.
+
+AlertLens should:
+
+- Send structured alert payloads and bounded enrichment context.
+- Use timeouts and rate limits.
+- Sanitize all output before Slack.
+- Treat HolmesGPT output as advisory analysis.
+- Never create PRs, commits, silences, or cluster mutations in the MVP.
+
+## Deterministic Enrichment
+
+Before calling HolmesGPT, AlertLens should attach cheap deterministic context when available:
+
+- Alert labels and annotations.
+- Alertmanager group key and status.
+- Runbook URL content or summary.
+- Recent matching alert history.
+- Prometheus trend context.
+- Kubernetes workload evidence, only if a safe read-only collector exists.
+
+This is useful only when bounded. The project should prefer small fixed context over broad collection.
+
+## Watchdog
+
+Alertmanager Watchdog should be treated as pipeline health, not an incident.
+
+Behavior:
+
+```text
+alertname=Watchdog -> record heartbeat metric only
+```
+
+AlertLens should not call HolmesGPT for Watchdog alerts and should not post recurring Watchdog RCA messages to Slack.
+
+Metrics:
+
+```text
+alertlens_watchdog_last_seen_timestamp
+alertlens_watchdog_received_total
+```
+
+Missing Watchdog should be alerted by a path that does not depend on AlertLens:
+
+```promql
+time() - alertlens_watchdog_last_seen_timestamp > 300
+```
+
+## Ad-hoc Slack Use
+
+AlertLens should support explicit mentions without becoming Vigil again.
+
+Supported:
+
+```text
+channel @AlertLens what is wrong with prod/api?
+-> create a thread and ask HolmesGPT
+
+thread @AlertLens investigate this
+-> use existing thread alert/RCA context and ask HolmesGPT
+```
+
+Rules:
+
+- Only respond in configured Slack channels.
+- Require explicit `@AlertLens`.
+- Top-level mentions create a thread.
+- Thread mentions reuse existing alert context when present.
+- No GitOps.
+- No arbitrary shell.
+- No cron management commands.
+
+## Scheduled Checks
+
+Scheduled checks are allowed, but only as declarative HolmesGPT prompts.
+
+Example:
+
+```yaml
+scheduledChecks:
+  - id: daily-cluster-summary
+    schedule: "0 9 * * 1-5"
+    channel: "#sre"
+    prompt: "Summarize current cluster health and recent critical alerts."
+```
+
+Rules:
+
+- Config file or Helm values only.
+- Default off.
+- Timeout, rate limit, and output length cap per job.
+- Failures emit metrics and a short Slack error at most.
+- No Slack commands to create/delete jobs.
+- No arbitrary script actions.
+
+## MVP Behaviors
+
+### Alertmanager RCA
+
+```gherkin
+Given Alertmanager sends a firing alert to Slack and AlertLens
+When AlertLens has a Slack thread mapping for the alert key
+Then AlertLens asks HolmesGPT for RCA
+And posts a bounded sanitized RCA into the existing Slack thread
+```
+
+### AlertLens Failure
+
+```gherkin
+Given AlertLens is down
+When Alertmanager sends a firing alert
+Then Alertmanager still posts the alert directly to Slack
+And operators still see the alert
+```
+
+### Watchdog
+
+```gherkin
+Given Alertmanager sends a Watchdog alert to AlertLens
+When AlertLens receives it
+Then AlertLens updates heartbeat metrics
+And does not call HolmesGPT
+And does not post recurring Slack RCA
+```
+
+### Ad-hoc Thread Follow-up
+
+```gherkin
+Given a Slack thread has an AlertLens alert context
+When a user posts "@AlertLens investigate this"
+Then AlertLens sends the thread context to HolmesGPT
+And posts the answer in the same thread
+```
+
+## Milestones
+
+### M0: Skeleton
+
+- HTTP health endpoint.
+- Metrics endpoint.
+- Config loading.
+- Slack client.
+- HolmesGPT client.
+
+### M1: Side-path Alertmanager RCA
+
+- Alertmanager webhook receiver.
+- Slack Events listener for Alertmanager parent messages.
+- External store for alert key to Slack thread mapping.
+- HolmesGPT RCA reply into Slack thread.
+- Output sanitization and length cap.
+
+### M2: Reliability
+
+- Watchdog heartbeat metrics.
+- Retry and rate limiting.
+- Alert storm control.
+- Resolved handling.
+- Active-active deployment with external store.
+
+### M3: Operator Convenience
+
+- `@AlertLens` ad-hoc questions.
+- Declarative scheduled checks.
+- Runbook enrichment.
+
+## Name
+
+AlertLens fits the narrowed product: it gives a clearer RCA view into alerts. It does not imply autonomous remediation or a broad SRE agent.
