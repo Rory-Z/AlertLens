@@ -21,8 +21,8 @@ If AlertLens is down, alerts still reach Slack through the mature Alertmanager i
 AlertLens keeps:
 
 - Alertmanager webhook ingestion.
-- Slack Events listener for Alertmanager bot messages and `@AlertLens` mentions.
-- Slack Web API replies into threads.
+- Slack Events listener for Alertmanager bot messages, status reactions, and `@AlertLens` mentions.
+- Slack Web API replies into threads and reactions on parent messages.
 - HolmesGPT RCA calls.
 - Small external state for alert/thread mapping.
 - Deterministic enrichment before RCA.
@@ -77,6 +77,33 @@ alert key -> Slack channel + parent ts/thread ts + status + last seen time
 6. AlertLens uses the stored mapping to reply in the existing thread.
 
 If the mapping is missing, AlertLens should either post a short fallback message or skip Slack output and record a metric. It should not create noisy duplicate incident messages by default.
+
+## Slack Status UX
+
+AlertLens should preserve Vigil's Slack thread experience. Operators should be able to look at the original Alertmanager Slack message and see whether AlertLens noticed it, is working on it, or failed.
+
+This requires Slack Events even when Alertmanager webhook is the RCA trigger. The webhook payload does not include the Slack `channel_id` or parent `message_ts`; Slack Events provides the message identity needed for reactions and thread replies.
+
+Parent message reactions:
+
+| Reaction | Meaning |
+|----------|---------|
+| `eyes` | AlertLens saw the Alertmanager Slack message and queued or correlated the alert |
+| `hourglass_flowing_sand` | RCA is running, optional if `eyes` is not enough |
+| `white_check_mark` | RCA or resolved handling completed |
+| `x` | RCA failed or AlertLens could not complete handling |
+
+Recommended flow:
+
+1. Slack Events receives the Alertmanager parent message.
+2. AlertLens extracts the alert key and stores `alert key -> channel + message_ts`.
+3. AlertLens adds `eyes` to the parent message.
+4. The Alertmanager webhook event arrives and drives RCA.
+5. On success, AlertLens removes `eyes` and adds `white_check_mark`.
+6. On failure, AlertLens removes `eyes` and adds `x`, then posts a short thread error only if configured.
+7. On resolved, AlertLens posts a short resolved summary in the original thread and keeps or adds `white_check_mark`.
+
+Reaction failures should not fail alert handling. They should be logged and counted as metrics because Slack permissions, deleted messages, or rate limits can make reactions unavailable.
 
 ## High Availability
 
@@ -254,6 +281,22 @@ Then AlertLens asks HolmesGPT for RCA
 And posts a bounded sanitized RCA into the existing Slack thread
 ```
 
+### Slack Status Reactions
+
+```gherkin
+Given Alertmanager posts a firing alert message to Slack
+When AlertLens receives the Slack event for that message
+Then AlertLens records the message channel and timestamp
+And adds an eyes reaction to the parent message
+```
+
+```gherkin
+Given AlertLens has posted RCA in the alert thread
+When RCA handling completes successfully
+Then AlertLens removes the eyes reaction when present
+And adds a white_check_mark reaction to the parent message
+```
+
 ### AlertLens Failure
 
 ```gherkin
@@ -295,8 +338,9 @@ And posts the answer in the same thread
 ### M1: Side-path Alertmanager RCA
 
 - Alertmanager webhook receiver.
-- Slack Events listener for Alertmanager parent messages.
-- External store for alert key to Slack thread mapping.
+- Slack Events listener for Alertmanager parent messages and `@AlertLens` mentions.
+- External store for alert key to Slack thread and status mapping.
+- Vigil-style parent message status reactions.
 - HolmesGPT RCA reply into Slack thread.
 - Output sanitization and length cap.
 
