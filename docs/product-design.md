@@ -9,9 +9,9 @@ AlertLens is a small no-UI service for Alertmanager-driven RCA in Slack.
 It should not become another broad SRE agent. The core product is:
 
 ```text
-Alertmanager -> Slack       # existing authoritative alert delivery
-Alertmanager -> AlertLens   # side-path webhook for structured alert payloads
-AlertLens    -> Slack       # RCA and follow-ups inside alert threads
+Alertmanager -> Slack       # existing authoritative alert delivery and trigger
+Slack Events -> AlertLens   # RCA trigger, thread anchor, and status UX
+AlertLens    -> Slack       # RCA and follow-ups inside the same threads
 ```
 
 If AlertLens is down, alerts still reach Slack through the mature Alertmanager integration. The worst case is losing RCA, not losing alert delivery.
@@ -20,11 +20,10 @@ If AlertLens is down, alerts still reach Slack through the mature Alertmanager i
 
 AlertLens keeps:
 
-- Alertmanager webhook ingestion.
 - Slack Events listener for Alertmanager bot messages, status reactions, and `@AlertLens` mentions.
 - Slack Web API replies into threads and reactions on parent messages.
 - HolmesGPT RCA calls.
-- Small external state for alert/thread mapping.
+- Lightweight in-process/session state for deduplication and conversation context.
 - Deterministic enrichment before RCA.
 - Watchdog heartbeat metrics.
 - Optional declarative scheduled checks.
@@ -38,6 +37,8 @@ AlertLens does not include:
 - A general autonomous agent.
 - Arbitrary shell command execution.
 - Slack commands that create or mutate scheduled jobs at runtime.
+- Alertmanager webhook ingestion in the MVP.
+- External thread storage or active-active HA in the MVP.
 
 ## Why Not Replace Alertmanager -> Slack
 
@@ -49,40 +50,44 @@ Alertmanager -> AlertLens -> Slack
 
 That is not acceptable for the first version. If AlertLens fails, operators must still see the alert.
 
-The preferred shape is side-path enhancement:
+The preferred shape is non-replacing enhancement:
 
 ```text
-Alertmanager -> Slack
-        \-> AlertLens
+Alertmanager -> Slack -> AlertLens
 ```
 
-AlertLens can fail independently. Alertmanager remains the source of notification truth.
+AlertLens can fail independently after Slack receives the alert. Alertmanager remains the source of notification truth.
 
-## Slack Thread Mapping
+## Slack-Triggered RCA
 
-AlertLens needs to post RCA into the same Slack thread as the original Alertmanager alert.
+AlertLens should use the Alertmanager Slack message as the single event source for the MVP. This keeps the UX and control flow close to Vigil while removing Vigil's agent, GitOps, ArgoCD, and arbitrary shell surface area.
 
 Recommended flow:
 
 1. Alertmanager posts a short alert message to Slack.
 2. AlertLens receives the Slack bot message through Slack Events.
 3. AlertLens extracts a stable fingerprint or group key from the message marker.
-4. AlertLens stores:
+4. AlertLens adds a status reaction to the parent message.
+5. AlertLens enriches the alert by querying Alertmanager APIs, runbooks, and configured read-only sources.
+6. AlertLens asks HolmesGPT for RCA.
+7. AlertLens posts the bounded RCA into the same Slack thread.
 
-```text
-alert key -> Slack channel + parent ts/thread ts + status + last seen time
-```
+Because the Slack event includes `channel_id` and `message_ts`, M1 does not need an external thread mapping database. The parent Slack message is the session anchor for the current handling flow.
 
-5. AlertLens receives the structured Alertmanager webhook payload.
-6. AlertLens uses the stored mapping to reply in the existing thread.
+Small in-memory or local persisted state is still useful for:
 
-If the mapping is missing, AlertLens should either post a short fallback message or skip Slack output and record a metric. It should not create noisy duplicate incident messages by default.
+- in-flight deduplication,
+- short conversation context,
+- rate limits,
+- alert storm control.
+
+But the MVP should not introduce Redis/Postgres solely for thread matching. Add external state only when active-active HA, durable incident history, or cross-restart recovery-thread continuity becomes a real requirement.
 
 ## Slack Status UX
 
 AlertLens should preserve Vigil's Slack thread experience. Operators should be able to look at the original Alertmanager Slack message and see whether AlertLens noticed it, is working on it, or failed.
 
-This requires Slack Events even when Alertmanager webhook is the RCA trigger. The webhook payload does not include the Slack `channel_id` or parent `message_ts`; Slack Events provides the message identity needed for reactions and thread replies.
+Slack Events are the RCA trigger in the MVP. They also provide the message identity needed for reactions and thread replies.
 
 Parent message reactions:
 
@@ -96,9 +101,9 @@ Parent message reactions:
 Recommended flow:
 
 1. Slack Events receives the Alertmanager parent message.
-2. AlertLens extracts the alert key and stores `alert key -> channel + message_ts`.
+2. AlertLens extracts the alert key from the marker.
 3. AlertLens adds `eyes` to the parent message.
-4. The Alertmanager webhook event arrives and drives RCA.
+4. AlertLens gathers context and runs RCA.
 5. On success, AlertLens removes `eyes` and adds `white_check_mark`.
 6. On failure, AlertLens removes `eyes` and adds `x`, then posts a short thread error only if configured.
 7. On resolved, AlertLens posts a short resolved summary in the original thread and keeps or adds `white_check_mark`.
@@ -107,9 +112,20 @@ Reaction failures should not fail alert handling. They should be logged and coun
 
 ## High Availability
 
-Active-active AlertLens needs external state if thread continuity matters.
+M1 should not promise active-active HA. Slack-triggered AlertLens should run as a single active consumer, matching Vigil's practical deployment model but with much less security-sensitive behavior.
 
-Minimum state:
+The important reliability boundary is that Alertmanager still posts alerts directly to Slack. If AlertLens is down, operators still see alerts.
+
+External state and active-active processing should be deferred until there is evidence they are needed.
+
+If future active-active HA is required, add:
+
+- external state for session/thread/dedup records,
+- idempotency keys based on Slack event ID and alert key,
+- duplicate reaction/reply suppression,
+- optional Alertmanager webhook ingestion.
+
+Minimum future state:
 
 ```text
 groupKey/fingerprint -> Slack channel + thread_ts + last status + last sent time
@@ -120,7 +136,7 @@ Recommended stores:
 - Redis for simple TTL-backed mappings.
 - Postgres if the project later needs durable incident history and querying.
 
-No external store means AlertLens can still run stateless, but it cannot guarantee that repeated/resolved alerts return to the original Slack thread after restart or across replicas.
+Without an external store, AlertLens cannot guarantee that repeated or resolved top-level Alertmanager messages return to the original Slack thread after restart or across active replicas. That is acceptable for the MVP; Alertmanager's direct Slack message remains visible even if AlertLens loses continuity.
 
 ## Slack Noise Policy
 
@@ -275,8 +291,8 @@ Rules:
 ### Alertmanager RCA
 
 ```gherkin
-Given Alertmanager sends a firing alert to Slack and AlertLens
-When AlertLens has a Slack thread mapping for the alert key
+Given Alertmanager sends a firing alert to Slack
+When AlertLens receives the Slack event for the Alertmanager message
 Then AlertLens asks HolmesGPT for RCA
 And posts a bounded sanitized RCA into the existing Slack thread
 ```
@@ -309,8 +325,8 @@ And operators still see the alert
 ### Watchdog
 
 ```gherkin
-Given Alertmanager sends a Watchdog alert to AlertLens
-When AlertLens receives it
+Given Alertmanager sends a Watchdog alert to Slack
+When AlertLens receives the Slack event for that Watchdog message
 Then AlertLens updates heartbeat metrics
 And does not call HolmesGPT
 And does not post recurring Slack RCA
@@ -335,12 +351,11 @@ And posts the answer in the same thread
 - Slack client.
 - HolmesGPT client.
 
-### M1: Side-path Alertmanager RCA
+### M1: Slack-Triggered Alertmanager RCA
 
-- Alertmanager webhook receiver.
 - Slack Events listener for Alertmanager parent messages and `@AlertLens` mentions.
-- External store for alert key to Slack thread and status mapping.
 - Vigil-style parent message status reactions.
+- Alertmanager API lookup for structured alert/rule context from marker data.
 - HolmesGPT RCA reply into Slack thread.
 - Output sanitization and length cap.
 
@@ -350,9 +365,14 @@ And posts the answer in the same thread
 - Retry and rate limiting.
 - Alert storm control.
 - Resolved handling.
-- Active-active deployment with external store.
 
-### M3: Operator Convenience
+### M3: Optional Webhook and Active-Active
+
+- Alertmanager webhook receiver if Slack-triggering becomes insufficient.
+- External store for thread/session/dedup state.
+- Active-active deployment.
+
+### M4: Operator Convenience
 
 - `@AlertLens` ad-hoc questions.
 - Declarative scheduled checks.
