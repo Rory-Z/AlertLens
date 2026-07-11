@@ -21,6 +21,7 @@ type Event struct {
 	Text     string
 	TS       string
 	ThreadTS string
+	Mention  bool
 }
 
 type Alertmanager interface {

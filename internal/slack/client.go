@@ -124,8 +124,38 @@ func (c *Client) consume(ctx context.Context, handler func(context.Context, serv
 }
 
 func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
-	message, ok := event.InnerEvent.Data.(*slackevents.MessageEvent)
-	if !ok || (message.SubType != "" && message.SubType != "bot_message") ||
+	switch inner := event.InnerEvent.Data.(type) {
+	case *slackevents.MessageEvent:
+		return translateMessage(eventID(event), inner, channels, botUserID)
+	case *slackevents.AppMentionEvent:
+		if !channels[inner.Channel] || inner.User == botUserID || inner.TimeStamp == "" {
+			return service.Event{}, false
+		}
+		text := strings.TrimSpace(strings.ReplaceAll(inner.Text, "<@"+botUserID+">", ""))
+		parts := make([]string, 0, 1+len(inner.Attachments))
+		if text != "" {
+			parts = append(parts, text)
+		}
+		for _, attachment := range inner.Attachments {
+			if attachment.Text != "" {
+				parts = append(parts, attachment.Text)
+			}
+		}
+		if len(parts) == 0 {
+			return service.Event{}, false
+		}
+		return service.Event{
+			ID: eventID(event), Channel: inner.Channel, User: inner.User, BotID: inner.BotID,
+			Text: strings.Join(parts, "\n"), TS: inner.TimeStamp, ThreadTS: inner.ThreadTimeStamp,
+			Mention: true,
+		}, true
+	default:
+		return service.Event{}, false
+	}
+}
+
+func translateMessage(eventID string, message *slackevents.MessageEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
+	if (message.SubType != "" && message.SubType != "bot_message") ||
 		!channels[message.Channel] || message.User == botUserID || message.TimeStamp == "" {
 		return service.Event{}, false
 	}
@@ -145,17 +175,20 @@ func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUs
 	if len(parts) == 0 {
 		return service.Event{}, false
 	}
-	eventID := ""
-	switch outer := event.Data.(type) {
-	case *slackevents.EventsAPICallbackEvent:
-		eventID = outer.EventID
-	case slackevents.EventsAPICallbackEvent:
-		eventID = outer.EventID
-	}
 	return service.Event{
 		ID: eventID, Channel: message.Channel, User: message.User, BotID: message.BotID,
 		Text: strings.Join(parts, "\n"), TS: message.TimeStamp, ThreadTS: message.ThreadTimeStamp,
 	}, true
+}
+
+func eventID(event slackevents.EventsAPIEvent) string {
+	switch outer := event.Data.(type) {
+	case *slackevents.EventsAPICallbackEvent:
+		return outer.EventID
+	case slackevents.EventsAPICallbackEvent:
+		return outer.EventID
+	}
+	return ""
 }
 
 func ignoreSlackError(err error, allowed string) error {

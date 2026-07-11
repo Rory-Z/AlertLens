@@ -35,10 +35,10 @@
 - Adds `Mention bool` to `service.Event`.
 - Extends `translate` to accept `*slackevents.AppMentionEvent` as well as message events.
 
-- [ ] Write failing tests for top-level and threaded `AppMentionEvent`, including event ID, channel, user, timestamp, thread timestamp, and bot mention removal from text. Assert ordinary `MessageEvent` remains `Mention=false`.
-- [ ] Run `go test ./internal/slack` and verify RED.
-- [ ] Implement the second concrete translation branch; channel/self filtering remains shared and edited message behavior stays unchanged.
-- [ ] Run race tests and commit:
+- [x] Write failing tests for top-level and threaded `AppMentionEvent`, including event ID, channel, user, timestamp, thread timestamp, and bot mention removal from text. Assert ordinary `MessageEvent` remains `Mention=false`.
+- [x] Run `go test ./internal/slack` and verify RED.
+- [x] Implement the second concrete translation branch; channel/self filtering remains shared and edited message behavior stays unchanged.
+- [x] Run race tests and commit:
 
 ```bash
 git add internal/slack internal/service

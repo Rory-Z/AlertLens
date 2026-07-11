@@ -72,6 +72,32 @@ func TestTranslateUsesNestedMessageFallback(t *testing.T) {
 	}
 }
 
+func TestTranslateAppMention(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		threadTS string
+	}{
+		{name: "top level"},
+		{name: "threaded", threadTS: "9.1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			event := slackevents.EventsAPIEvent{
+				Type: slackevents.CallbackEvent,
+				Data: &slackevents.EventsAPICallbackEvent{EventID: "EvMention"},
+				InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.AppMentionEvent{
+					User: "U1", Text: "<@U_SELF> investigate prod", TimeStamp: "10.1",
+					ThreadTimeStamp: tt.threadTS, Channel: "C1",
+				}},
+			}
+			got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
+			if !ok || !got.Mention || got.ID != "EvMention" || got.Channel != "C1" ||
+				got.User != "U1" || got.Text != "investigate prod" || got.TS != "10.1" || got.ThreadTS != tt.threadTS {
+				t.Fatalf("translate() = (%#v, %v)", got, ok)
+			}
+		})
+	}
+}
+
 func TestTranslateRejectsIrrelevantMessages(t *testing.T) {
 	base := func() slackevents.EventsAPIEvent {
 		return slackevents.EventsAPIEvent{
