@@ -96,6 +96,13 @@ func (s *Store) Ready() error {
 	return s.readyErr
 }
 
+func (s *Store) Prune(now time.Time) error {
+	return s.Update(func(snapshot *Snapshot) error {
+		prune(snapshot, now)
+		return nil
+	})
+}
+
 func (s *Store) persist(snapshot Snapshot) (bool, error) {
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {

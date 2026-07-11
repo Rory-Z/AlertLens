@@ -90,27 +90,27 @@ git commit -m "feat(service): handle confirmed alert resolution"
 - Produces `(*session.Store).Prune(now time.Time) error` using the existing private prune function and atomic update.
 - Uses 64 fixed `sync.Mutex` shards selected by FNV-1a of the session key.
 
-- [ ] **Step 1: Write failing event-ID dedup tests**
+- [x] **Step 1: Write failing event-ID dedup tests**
 
 Assert that two submissions with `ID=Ev1` produce only one `eyes`, one Alertmanager call, and one RCA. Reopen the same state file in a new store/service instance and assert `Ev1` remains ignored until expiry. Empty event IDs retain the existing test-friendly behavior and are not deduplicated.
 
-- [ ] **Step 2: Implement atomic receipt dedup**
+- [x] **Step 2: Implement atomic receipt dedup**
 
 Before adding `eyes`, `Submit` calls `Store.Update` and atomically checks `Snapshot.EventIDs[event.ID]`. An unexpired ID returns false without reactions. A new ID stores `now+EventDedupTTL`; persistence failure returns false and leaves readiness degraded. Do not add an in-memory duplicate map beside the snapshot.
 
-- [ ] **Step 3: Write and implement prune tests**
+- [x] **Step 3: Write and implement prune tests**
 
 Test `Store.Prune` removes only expired sessions/event IDs and persists the result. In `Service.Run`, one fixed one-minute ticker calls `Prune(now)` until cancellation; record persistence failures in metrics in Task 3. Do not add a cleanup interval configuration knob.
 
-- [ ] **Step 4: Write a failing same-session ordering test**
+- [x] **Step 4: Write a failing same-session ordering test**
 
-With two workers, block the first Holmes call, submit a duplicate identity, and assert the second Alertmanager call does not begin until the first work item finishes. Submit a different identity and assert it can reach Holmes while the first remains blocked.
+With three workers, block the first Holmes call, submit a duplicate identity, and assert the second Alertmanager call does not begin until the first work item finishes. Submit a different identity and assert it can reach Holmes while the first remains blocked.
 
-- [ ] **Step 5: Implement bounded lock sharding**
+- [x] **Step 5: Implement bounded lock sharding**
 
 Add `[64]sync.Mutex` to `Service`. At the start of `handle`, hash `identity.Key()` with `hash/fnv`, lock its shard, and defer unlock. This deliberately permits unrelated keys that collide to serialize without leaking one mutex per alert.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run: `gofmt -w internal/service internal/session && go test -race ./internal/service ./internal/session -count=10 && go test ./...`
 

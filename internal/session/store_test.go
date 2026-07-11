@@ -164,6 +164,35 @@ func TestOpenPrunesExpiredState(t *testing.T) {
 	}
 }
 
+func TestPrunePersistsExpiredState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := Open(path, func() time.Time { return testNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(func(snapshot *Snapshot) error {
+		snapshot.Sessions["expired"] = Record{Key: "expired", ExpiresAt: testNow.Add(time.Minute)}
+		snapshot.Sessions["active"] = Record{Key: "active", ExpiresAt: testNow.Add(3 * time.Minute)}
+		snapshot.EventIDs["expired"] = testNow.Add(time.Minute)
+		snapshot.EventIDs["active"] = testNow.Add(3 * time.Minute)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Prune(testNow.Add(2 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path, func() time.Time { return testNow.Add(2 * time.Minute) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.Snapshot()
+	if len(got.Sessions) != 1 || got.Sessions["active"].Key != "active" ||
+		len(got.EventIDs) != 1 || got.EventIDs["active"].IsZero() {
+		t.Fatalf("snapshot = %#v", got)
+	}
+}
+
 func TestUpdateCallbackErrorLeavesStateUnchanged(t *testing.T) {
 	store := openTestStore(t)
 	wantErr := errors.New("reject update")

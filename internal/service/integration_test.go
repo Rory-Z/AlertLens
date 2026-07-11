@@ -157,6 +157,145 @@ func TestDuplicateActiveAlertDoesNotRepeatRCA(t *testing.T) {
 	}
 }
 
+func TestDuplicateEventIDIsIgnoredBeforeReaction(t *testing.T) {
+	var alertmanagerCalls atomic.Int32
+	slack := &fakeSlack{}
+	service, _ := startBehaviorService(t,
+		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) {
+			alertmanagerCalls.Add(1)
+			return []alertmanager.Alert{{Labels: map[string]string{"alertname": "A"}}}, nil
+		}),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) { return "answer", nil }),
+		slack,
+	)
+	event := Event{ID: "Ev1", Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace= -->`, TS: "1"}
+	if !service.Submit(context.Background(), event) {
+		t.Fatal("first event rejected")
+	}
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:1") })
+	event.TS = "2"
+	if service.Submit(context.Background(), event) {
+		t.Fatal("duplicate event accepted")
+	}
+	if alertmanagerCalls.Load() != 1 || slack.hasReaction("add:eyes:C1:2") {
+		t.Fatalf("Alertmanager calls = %d, reactions = %#v", alertmanagerCalls.Load(), slack.reactionLog())
+	}
+}
+
+func TestEventIDDedupSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	store, err := session.Open(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSlack := &fakeSlack{}
+	first := New(store, nil, nil, firstSlack, Config{
+		QueueSize: 1, Workers: 1, EventDedupTTL: 10 * time.Minute,
+	}, func() time.Time { return now })
+	event := Event{ID: "Ev1", Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace= -->`, TS: "1"}
+	if !first.Submit(context.Background(), event) {
+		t.Fatal("first event rejected")
+	}
+
+	reopened, err := session.Open(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSlack := &fakeSlack{}
+	second := New(reopened, nil, nil, secondSlack, Config{
+		QueueSize: 1, Workers: 1, EventDedupTTL: 10 * time.Minute,
+	}, func() time.Time { return now })
+	if second.Submit(context.Background(), event) {
+		t.Fatal("replayed event accepted after restart")
+	}
+	if len(secondSlack.reactionLog()) != 0 {
+		t.Fatalf("reactions = %#v", secondSlack.reactionLog())
+	}
+	expired, err := session.Open(path, func() time.Time { return now.Add(11 * time.Minute) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	third := New(expired, nil, nil, &fakeSlack{}, Config{
+		QueueSize: 1, Workers: 1, EventDedupTTL: 10 * time.Minute,
+	}, func() time.Time { return now.Add(11 * time.Minute) })
+	if !third.Submit(context.Background(), event) {
+		t.Fatal("expired event ID was not accepted")
+	}
+}
+
+func TestSameSessionIsOrderedWhileDifferentSessionContinues(t *testing.T) {
+	var aAlertmanagerCalls atomic.Int32
+	secondAStarted := make(chan struct{})
+	aHolmesStarted := make(chan struct{})
+	releaseAHolmes := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseAHolmes) }) })
+	bHolmesStarted := make(chan struct{})
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slack := &fakeSlack{}
+	service := New(store,
+		alertmanagerFunc(func(_ context.Context, alertname, namespace string) ([]alertmanager.Alert, error) {
+			if alertname == "A" && aAlertmanagerCalls.Add(1) == 2 {
+				close(secondAStarted)
+			}
+			return []alertmanager.Alert{{Labels: map[string]string{"alertname": alertname, "namespace": namespace}}}, nil
+		}),
+		holmesFunc(func(ctx context.Context, request holmes.Request) (string, error) {
+			switch request.SourceRef {
+			case "am:A:ns":
+				close(aHolmesStarted)
+				select {
+				case <-releaseAHolmes:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			case "am:B:ns":
+				close(bHolmesStarted)
+			}
+			return "answer", nil
+		}),
+		slack,
+		Config{
+			QueueSize: 10, Workers: 3, EventDedupTTL: 10 * time.Minute,
+			AlertSessionTTL: 24 * time.Hour, ResolvedSessionTTL: 24 * time.Hour,
+			AlertPayloadMaxBytes: 32768, RunbookMaxBytes: 8192,
+			ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, time.Now,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	service.Submit(ctx, Event{Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace=ns -->`, TS: "1"})
+	select {
+	case <-aHolmesStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first A did not reach Holmes")
+	}
+	service.Submit(ctx, Event{Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace=ns -->`, TS: "2"})
+	service.Submit(ctx, Event{Channel: "C1", Text: `<!-- alertlens:alertname=B,namespace=ns -->`, TS: "3"})
+	select {
+	case <-bHolmesStarted:
+	case <-time.After(time.Second):
+		t.Fatal("unrelated B was blocked by A")
+	}
+	select {
+	case <-secondAStarted:
+		t.Fatal("second A reached Alertmanager before first A completed")
+	default:
+	}
+	releaseOnce.Do(func() { close(releaseAHolmes) })
+	select {
+	case <-secondAStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second A did not continue after first A completed")
+	}
+}
+
 func TestAlertmanagerFailureDoesNotCreateSession(t *testing.T) {
 	slack := &fakeSlack{}
 	service, store := startBehaviorService(t,
@@ -395,7 +534,8 @@ func startBehaviorService(t *testing.T, am Alertmanager, h Holmes, slack *fakeSl
 		t.Fatal(err)
 	}
 	service := New(store, am, h, slack, Config{
-		QueueSize: 10, Workers: 1, AlertSessionTTL: 24 * time.Hour, ResolvedSessionTTL: 24 * time.Hour,
+		QueueSize: 10, Workers: 1, EventDedupTTL: 10 * time.Minute,
+		AlertSessionTTL: 24 * time.Hour, ResolvedSessionTTL: 24 * time.Hour,
 		AlertPayloadMaxBytes: 32768, RunbookMaxBytes: 8192,
 		ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
 	}, func() time.Time { return now })

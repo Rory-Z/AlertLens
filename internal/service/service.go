@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"hash/fnv"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ type Slack interface {
 type Config struct {
 	QueueSize            int
 	Workers              int
+	EventDedupTTL        time.Duration
 	AlertSessionTTL      time.Duration
 	ResolvedSessionTTL   time.Duration
 	AlertPayloadMaxBytes int
@@ -59,6 +61,7 @@ type Service struct {
 	config       Config
 	now          func() time.Time
 	queue        chan work
+	sessionLocks [64]sync.Mutex
 }
 
 func New(store *session.Store, alertmanager Alertmanager, holmes Holmes, slack Slack, config Config, now func() time.Time) *Service {
@@ -72,6 +75,20 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 	identity, ok := marker.Parse(event.Text)
 	if !ok {
 		return false
+	}
+	if event.ID != "" {
+		duplicate := false
+		now := s.now()
+		if err := s.store.Update(func(snapshot *session.Snapshot) error {
+			if expiresAt, exists := snapshot.EventIDs[event.ID]; exists && expiresAt.After(now) {
+				duplicate = true
+				return nil
+			}
+			snapshot.EventIDs[event.ID] = now.Add(s.config.EventDedupTTL)
+			return nil
+		}); err != nil || duplicate {
+			return false
+		}
 	}
 	_ = s.slack.AddReaction(ctx, "eyes", event.Channel, event.TS)
 	select {
@@ -99,10 +116,26 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}()
 	}
-	workers.Wait()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			workers.Wait()
+			return
+		case <-ticker.C:
+			if s.store != nil {
+				_ = s.store.Prune(s.now())
+			}
+		}
+	}
 }
 
 func (s *Service) handle(ctx context.Context, item work) {
+	lock := &s.sessionLocks[sessionShard(item.identity.Key())]
+	lock.Lock()
+	defer lock.Unlock()
+
 	alerts, err := s.alertmanager.Active(ctx, item.identity.Alertname, item.identity.Namespace)
 	if err != nil {
 		s.transition(ctx, item.event, "eyes", "x")
@@ -168,6 +201,12 @@ func (s *Service) handle(ctx context.Context, item work) {
 		return
 	}
 	s.transition(ctx, item.event, "hourglass_flowing_sand", "white_check_mark")
+}
+
+func sessionShard(key string) uint32 {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(key))
+	return hash.Sum32() % 64
 }
 
 func (s *Service) resolve(ctx context.Context, item work) {
