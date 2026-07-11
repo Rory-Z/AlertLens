@@ -101,7 +101,7 @@ Expected: exit status 1.
 ```yaml
 name: Conventional Commits
 
-on:
+"on":
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
@@ -124,12 +124,14 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         shell: bash
         run: |
+          set -euo pipefail
+
           pattern='^[a-z][a-z0-9-]*(\([^()]+\))?!?: .+'
 
           check() {
             local label=$1 message=$2
             if [[ ! $message =~ $pattern ]]; then
-              echo "::error::$label does not follow Conventional Commits: $message"
+              echo "::error::$label has invalid format: $message"
               return 1
             fi
           }
@@ -162,7 +164,7 @@ Expected: exit status 0.
 Run:
 
 ```bash
-ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' .github/workflows/conventional-commits.yml
+python3 -c 'import pathlib, yaml; yaml.safe_load(pathlib.Path(".github/workflows/conventional-commits.yml").read_text())'
 git diff --check
 git diff -- CONTRIBUTING.md .github/workflows/conventional-commits.yml
 ```
@@ -190,7 +192,7 @@ git commit -m "ci: check conventional commit style"
 
 ```bash
 git diff HEAD~2 --check
-ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' .github/workflows/conventional-commits.yml
+python3 -c 'import pathlib, yaml; yaml.safe_load(pathlib.Path(".github/workflows/conventional-commits.yml").read_text())'
 bash -c '
 pattern="^[a-z][a-z0-9-]*(\\([^()]+\\))?!?: .+$"
 valid=("feat: add alerts" "fix(slack): avoid duplicates" "feat(api)!: remove endpoint")
