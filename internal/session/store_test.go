@@ -196,7 +196,7 @@ func TestUpdateEncodeFailureDegradesReadiness(t *testing.T) {
 	}
 }
 
-func TestWriteFailureDegradesReadinessAndPreservesState(t *testing.T) {
+func TestWriteFailureDegradesReadinessAndKeepsMemoryState(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory permissions")
 	}
@@ -217,8 +217,8 @@ func TestWriteFailureDegradesReadinessAndPreservesState(t *testing.T) {
 	if err == nil || store.Ready() == nil {
 		t.Fatalf("write error = %v, ready error = %v", err, store.Ready())
 	}
-	if len(store.Snapshot().Sessions) != 0 {
-		t.Fatalf("failed update changed memory: %#v", store.Snapshot())
+	if store.Snapshot().Sessions["lost"].Key != "lost" {
+		t.Fatalf("failed write lost memory state: %#v", store.Snapshot())
 	}
 
 	if err := os.Chmod(dir, 0o700); err != nil {
@@ -232,6 +232,9 @@ func TestWriteFailureDegradesReadinessAndPreservesState(t *testing.T) {
 	}
 	if err := store.Ready(); err != nil {
 		t.Fatalf("readiness did not recover: %v", err)
+	}
+	if got := store.Snapshot(); got.Sessions["lost"].Key != "lost" || got.Sessions["saved"].Key != "saved" {
+		t.Fatalf("recovered snapshot = %#v", got)
 	}
 }
 

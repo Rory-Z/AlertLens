@@ -78,6 +78,10 @@ func (s *Store) Update(update func(*Snapshot) error) error {
 		s.snapshot = next
 	}
 	if err != nil {
+		var encodeErr *stateEncodeError
+		if !errors.As(err, &encodeErr) {
+			s.snapshot = next
+		}
 		s.readyErr = err
 		return err
 	}
@@ -95,7 +99,7 @@ func (s *Store) Ready() error {
 func (s *Store) persist(snapshot Snapshot) (bool, error) {
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
-		return false, fmt.Errorf("encode state: %w", err)
+		return false, &stateEncodeError{err: err}
 	}
 	data = append(data, '\n')
 
@@ -133,6 +137,18 @@ func (s *Store) persist(snapshot Snapshot) (bool, error) {
 		return true, fmt.Errorf("sync state directory: %w", err)
 	}
 	return true, nil
+}
+
+type stateEncodeError struct {
+	err error
+}
+
+func (e *stateEncodeError) Error() string {
+	return fmt.Sprintf("encode state: %v", e.err)
+}
+
+func (e *stateEncodeError) Unwrap() error {
+	return e.err
 }
 
 func prune(snapshot *Snapshot, now time.Time) {
