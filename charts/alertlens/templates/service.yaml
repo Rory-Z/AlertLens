@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "alertlens.fullname" . }}
+  labels:
+    {{- include "alertlens.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "alertlens.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.service.port }}
+      targetPort: metrics
+      protocol: TCP

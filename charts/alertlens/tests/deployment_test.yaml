@@ -1,0 +1,29 @@
+suite: deployment
+templates:
+  - templates/deployment.yaml
+tests:
+  - it: renders one hardened Recreate replica with persistent state
+    set:
+      slack.existingSecret: alertlens-slack
+      slack.alertChannels:
+        - C1
+      alertmanagerURL: http://alertmanager:9093
+      holmesURL: http://holmes:5050
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STATE_PATH
+            value: /var/lib/alertlens/state.json
