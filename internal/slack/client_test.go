@@ -160,6 +160,68 @@ func TestReactionIdempotencyErrorsAreSuccess(t *testing.T) {
 	}
 }
 
+func TestWebAPIOperationsRetryRateLimitOnce(t *testing.T) {
+	var mu sync.Mutex
+	attempts := make(map[string]int)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts[r.URL.Path]++
+		attempt := attempts[r.URL.Path]
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if attempt == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"ok":false,"error":"ratelimited"}`)
+			return
+		}
+		if r.URL.Path == "/api/chat.postMessage" {
+			_, _ = io.WriteString(w, `{"ok":true,"channel":"C1","ts":"2","message":{"text":"answer"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+	client := &Client{api: slackapi.New("xoxb-test", slackapi.OptionAPIURL(server.URL+"/api/"))}
+	ctx := context.Background()
+	if err := client.AddReaction(ctx, "eyes", "C1", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RemoveReaction(ctx, "eyes", "C1", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Reply(ctx, "C1", "1", "answer"); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/reactions.add", "/api/reactions.remove", "/api/chat.postMessage"} {
+		if attempts[path] != 2 {
+			t.Fatalf("%s attempts = %d", path, attempts[path])
+		}
+	}
+}
+
+func TestRetryRateLimitCancellationAndOrdinaryError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	attempts := 0
+	err := retryRateLimit(ctx, func() error {
+		attempts++
+		return &slackapi.RateLimitedError{RetryAfter: time.Hour}
+	})
+	if !errors.Is(err, context.Canceled) || attempts != 1 {
+		t.Fatalf("error = %v, attempts = %d", err, attempts)
+	}
+	want := errors.New("ordinary")
+	attempts = 0
+	err = retryRateLimit(context.Background(), func() error {
+		attempts++
+		return want
+	})
+	if !errors.Is(err, want) || attempts != 1 {
+		t.Fatalf("error = %v, attempts = %d", err, attempts)
+	}
+}
+
 func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/auth.test" {

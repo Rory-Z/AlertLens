@@ -195,19 +195,19 @@ git commit -m "feat(metrics): expose alert lifecycle metrics"
 **Interfaces:**
 - Adds one private `retryRateLimit(ctx, operation)` helper; public Slack/service interfaces stay unchanged.
 
-- [ ] **Step 1: Write failing Slack 429 tests**
+- [x] **Step 1: Write failing Slack 429 tests**
 
 For add/remove reaction and reply, return a `slack.RateLimitedError{RetryAfter: 10ms}` once and success next. Assert two attempts. Add cancellation and ordinary-error cases asserting no second call.
 
-- [ ] **Step 2: Implement one context-aware retry**
+- [x] **Step 2: Implement one context-aware retry**
 
 Call the operation, use `errors.As` for `*slack.RateLimitedError`, wait exactly `RetryAfter` with a timer/select on context, then call once more. Preserve `already_reacted` and `no_reaction` handling after either attempt.
 
-- [ ] **Step 3: Run the full milestone verification**
+- [x] **Step 3: Run the full milestone verification**
 
 Run the CI-equivalent gate: gofmt, vet, race+coverage >=90%, Go build, Helm lint/unit, actionlint, Docker build, then render and server-side dry-run using `~/.kube/flowmq-dev-tiger.yaml`.
 
-- [ ] **Step 4: Update README and commit**
+- [x] **Step 4: Update README and commit**
 
 Document resolved behavior, event-ID restart dedup, `/metrics`, and the Watchdog missing expression. Do not claim ad-hoc/follow-up support.
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -75,18 +76,24 @@ func (c *Client) Ready() error {
 }
 
 func (c *Client) AddReaction(ctx context.Context, name, channel, ts string) error {
-	err := c.api.AddReactionContext(ctx, name, slackapi.NewRefToMessage(channel, ts))
+	err := retryRateLimit(ctx, func() error {
+		return c.api.AddReactionContext(ctx, name, slackapi.NewRefToMessage(channel, ts))
+	})
 	return ignoreSlackError(err, "already_reacted")
 }
 
 func (c *Client) RemoveReaction(ctx context.Context, name, channel, ts string) error {
-	err := c.api.RemoveReactionContext(ctx, name, slackapi.NewRefToMessage(channel, ts))
+	err := retryRateLimit(ctx, func() error {
+		return c.api.RemoveReactionContext(ctx, name, slackapi.NewRefToMessage(channel, ts))
+	})
 	return ignoreSlackError(err, "no_reaction")
 }
 
 func (c *Client) Reply(ctx context.Context, channel, threadTS, text string) error {
-	_, _, err := c.api.PostMessageContext(ctx, channel, slackapi.MsgOptionText(text, false), slackapi.MsgOptionTS(threadTS))
-	return err
+	return retryRateLimit(ctx, func() error {
+		_, _, err := c.api.PostMessageContext(ctx, channel, slackapi.MsgOptionText(text, false), slackapi.MsgOptionTS(threadTS))
+		return err
+	})
 }
 
 func (c *Client) consume(ctx context.Context, handler func(context.Context, service.Event) bool) {
@@ -160,4 +167,20 @@ func ignoreSlackError(err error, allowed string) error {
 		return nil
 	}
 	return err
+}
+
+func retryRateLimit(ctx context.Context, operation func() error) error {
+	err := operation()
+	var rateLimited *slackapi.RateLimitedError
+	if !errors.As(err, &rateLimited) {
+		return err
+	}
+	timer := time.NewTimer(rateLimited.RetryAfter)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return operation()
+	}
 }

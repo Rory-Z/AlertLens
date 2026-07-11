@@ -4,7 +4,15 @@ Alertmanager-first HolmesGPT RCA companion for Slack.
 
 AlertLens is designed to keep the existing **Alertmanager -> Slack** notification path as the source of truth. Alertmanager posts the authoritative alert message to Slack; AlertLens listens to that Slack message, enriches it, asks HolmesGPT for RCA, and posts concise analysis into the same thread.
 
-The firing-alert path is implemented; resolved alerts, ad-hoc questions, and thread follow-ups are being built in later verified milestones. See the [approved design](docs/superpowers/specs/2026-07-11-alertlens-design.md) for the complete MVP contract.
+The firing and resolved alert paths are implemented; ad-hoc questions and thread follow-ups are being built in a later verified milestone. See the [approved design](docs/superpowers/specs/2026-07-11-alertlens-design.md) for the complete MVP contract.
+
+Current alert behavior:
+
+- marked Slack notifications are confirmed against Alertmanager before processing
+- firing alerts receive one HolmesGPT RCA per active session
+- confirmed resolution replies in the original thread and adds `large_green_circle`
+- Slack event-ID deduplication and thread/session state survive a single-replica restart
+- Watchdog updates metrics without invoking HolmesGPT
 
 ## Slack app
 
@@ -38,7 +46,14 @@ STATE_PATH=/tmp/alertlens-state.json \
 go run ./cmd/alertlens
 ```
 
-The process exposes `/healthz` and `/readyz` on port 9090 by default.
+The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default.
+
+Alert on a missing Watchdog without depending on AlertLens to evaluate the condition:
+
+```promql
+absent(alertlens_watchdog_last_seen_timestamp)
+or time() - alertlens_watchdog_last_seen_timestamp > 300
+```
 
 ## Verification
 
