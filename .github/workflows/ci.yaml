@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-go@v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify Go
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          go tool cover -func=coverage.out | awk '/^total:/ { gsub("%", "", $3); if ($3 + 0 < 90) exit 1 }'
+          go build ./cmd/alertlens
+      - uses: azure/setup-helm@v5.0.1
+      - name: Install Helm unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v1.1.1
+      - name: Verify Helm chart
+        run: |
+          helm lint charts/alertlens \
+            --set slack.existingSecret=alertlens-slack \
+            --set-string 'slack.alertChannels[0]=C1' \
+            --set alertmanagerURL=http://alertmanager:9093 \
+            --set holmesURL=http://holmes:5050
+          helm unittest charts/alertlens
+      - name: Build image
+        run: docker build -t alertlens:test .
