@@ -346,11 +346,11 @@ git commit -m "feat(slack): add Socket Mode adapter"
 - Consumes every concrete client from Tasks 2-4.
 - Readiness is healthy only when both `session.Store.Ready()` and `slack.Client.Ready()` return nil.
 
-- [ ] **Step 1: Write failing assembly tests**
+- [x] **Step 1: Write failing assembly tests**
 
 Keep startup network-free in tests by passing an already-canceled context after configuration and store initialization. Assert invalid/corrupt state still fails before Slack starts. Add a readiness test combining a store error and a disconnected Slack error while ensuring `/readyz` always returns the generic `not ready` body.
 
-- [ ] **Step 2: Wire concrete dependencies**
+- [x] **Step 2: Wire concrete dependencies**
 
 In `run`, create the session store, Alertmanager client, Holmes client, Slack client, and service directly; do not add factories or a dependency-injection framework. Start the service workers and HTTP server, then run Socket Mode until context cancellation or a terminal error. Shut down the HTTP server within five seconds. Readiness checks store first, then Socket Mode connection.
 
@@ -360,7 +360,7 @@ Update README status and document the required Slack scopes/events without claim
 - bot scopes: `app_mentions:read`, `channels:history`, `chat:write`, `reactions:read`, `reactions:write`;
 - event subscriptions: `message.channels` and `app_mention` (the latter is used in milestone 3).
 
-- [ ] **Step 3: Run the complete milestone verification**
+- [x] **Step 3: Run the complete milestone verification**
 
 Run:
 
@@ -379,11 +379,11 @@ docker build -t alertlens:test .
 
 Expected: all commands exit 0, coverage remains at least 90%, and the container builds with Go 1.25.12.
 
-- [ ] **Step 4: Server-side dry-run the rendered release**
+- [x] **Step 4: Server-side dry-run the rendered release**
 
 Render with placeholder Slack secret/channel values and apply using `--dry-run=server` with `~/.kube/flowmq-dev-tiger.yaml`. Expected: Kubernetes accepts every object and creates nothing.
 
-- [ ] **Step 5: Commit the milestone wiring**
+- [x] **Step 5: Commit the milestone wiring**
 
 ```bash
 git add cmd README.md
