@@ -98,6 +98,39 @@ func TestTranslateAppMention(t *testing.T) {
 	}
 }
 
+func TestTranslateMentionBoundary(t *testing.T) {
+	base := func() slackevents.EventsAPIEvent {
+		return slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.AppMentionEvent{
+			User: "U1", Text: "<@U_SELF>", TimeStamp: "1", Channel: "C1",
+		}}}
+	}
+	t.Run("attachment only", func(t *testing.T) {
+		event := base()
+		event.InnerEvent.Data.(*slackevents.AppMentionEvent).Attachments = []slackapi.Attachment{{Text: "question"}}
+		got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
+		if !ok || got.Text != "question" || got.ID != "" {
+			t.Fatalf("translate() = (%#v, %v)", got, ok)
+		}
+	})
+	for _, tt := range []struct {
+		name   string
+		mutate func(*slackevents.AppMentionEvent)
+	}{
+		{name: "unmonitored", mutate: func(e *slackevents.AppMentionEvent) { e.Channel = "C2" }},
+		{name: "self", mutate: func(e *slackevents.AppMentionEvent) { e.User = "U_SELF" }},
+		{name: "missing timestamp", mutate: func(e *slackevents.AppMentionEvent) { e.TimeStamp = "" }},
+		{name: "empty", mutate: func(*slackevents.AppMentionEvent) {}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			event := base()
+			tt.mutate(event.InnerEvent.Data.(*slackevents.AppMentionEvent))
+			if _, ok := translate(event, map[string]bool{"C1": true}, "U_SELF"); ok {
+				t.Fatal("event accepted")
+			}
+		})
+	}
+}
+
 func TestTranslateRejectsIrrelevantMessages(t *testing.T) {
 	base := func() slackevents.EventsAPIEvent {
 		return slackevents.EventsAPIEvent{
