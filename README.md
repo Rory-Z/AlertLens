@@ -24,7 +24,7 @@ Use a dedicated Slack App while AlertLens and Vigil run in parallel. Enable Sock
 
 - app token scope: `connections:write`
 - bot scopes: `app_mentions:read`, `channels:history`, `chat:write`, `reactions:read`, `reactions:write`
-- event subscriptions: `message.channels`, plus `app_mention` for the upcoming ad-hoc/follow-up milestone
+- event subscriptions: `message.channels` and `app_mention`
 
 Do not share Vigil's app token: simultaneous Socket Mode clients compete for envelopes.
 
@@ -51,6 +51,33 @@ go run ./cmd/alertlens
 ```
 
 The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default.
+
+## Deployment
+
+Create a dedicated Secret whose keys are `bot-token` and `app-token`; do not put either token in Helm values. The chart requires an RWO PVC. If the cluster has no default StorageClass, set `state.storageClass` explicitly (the FlowMQ dev cluster uses `gp3`).
+
+The default NetworkPolicy permits DNS and Slack HTTPS but intentionally does not guess the internal network ranges for HolmesGPT and Alertmanager. Add the smallest pod or service CIDRs and the ports used by the configured URLs:
+
+```yaml
+state:
+  storageClass: gp3
+
+networkPolicy:
+  internalEgress:
+    - cidr: <alertmanager-pod-or-service-cidr>
+      ports: [9093]
+    - cidr: <holmes-pod-or-service-cidr>
+      ports: [80]
+```
+
+For the FlowMQ dev cluster, the service URLs are:
+
+```text
+http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093
+http://holmes-holmes.holmes.svc:80
+```
+
+Internal endpoint IPs can change, so discover the current CIDRs at deployment time instead of committing them. A real smoke deployment also needs an image that the cluster can pull and a separate Slack App/test channel.
 
 Alert on a missing Watchdog without depending on AlertLens to evaluate the condition:
 
