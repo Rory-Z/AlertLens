@@ -110,7 +110,7 @@ git commit -m "feat(marker): parse Alertmanager Slack markers"
 - Produces: `holmes.Request` matching HolmesGPT 0.35.0 request field names.
 - Produces: `holmes.New(baseURL *url.URL, timeout time.Duration) *Client` and `(*Client).Chat(context.Context, Request) (string, error)`.
 
-- [ ] **Step 1: Write failing Alertmanager contract tests**
+- [x] **Step 1: Write failing Alertmanager contract tests**
 
 Use `httptest.Server` to assert the exact request and filtering behavior:
 
@@ -137,7 +137,7 @@ func TestActive(t *testing.T) {
 
 Add cases for empty namespace matching a missing label, non-2xx status, malformed/oversized JSON, timeout, and two transient 5xx responses followed by success. Assert there are at most three total attempts and no retry on a 4xx response.
 
-- [ ] **Step 2: Verify Alertmanager RED and implement the client**
+- [x] **Step 2: Verify Alertmanager RED and implement the client**
 
 Run: `go test ./internal/alertmanager`
 
@@ -145,7 +145,7 @@ Expected: FAIL because the package implementation does not exist.
 
 Implement a concrete client with its own `http.Client{Timeout: timeout}`. Resolve `/api/v2/alerts` relative to the configured base URL, set the three query parameters, limit the response body to 4 MiB, and decode complete JSON. Retry network errors and 5xx responses up to three total attempts with context-aware 100 ms then 200 ms delays; do not retry 4xx or JSON errors. Filter locally by exact `alertname` and namespace; a missing namespace label equals empty namespace.
 
-- [ ] **Step 3: Write failing HolmesGPT 0.35.0 contract tests**
+- [x] **Step 3: Write failing HolmesGPT 0.35.0 contract tests**
 
 The request type is exact and intentionally omits model/key fields:
 
@@ -167,7 +167,7 @@ type Request struct {
 
 Use `httptest.Server` to decode the request, assert `POST /api/chat`, `Content-Type: application/json`, `request_source=alert_investigation`, and absence of `model`, `api_key`, and authorization headers. Return `{"analysis":"root cause"}` and assert the client returns `root cause`. Add tests for timeout, non-2xx, malformed/oversized response, and empty analysis. Assert the server receives exactly one request after a failure.
 
-- [ ] **Step 4: Verify Holmes RED and implement the client**
+- [x] **Step 4: Verify Holmes RED and implement the client**
 
 Run: `go test ./internal/holmes`
 
@@ -175,7 +175,7 @@ Expected: FAIL because `Request`, `New`, and `Chat` do not exist.
 
 Implement one non-retrying POST with the configured timeout, a 4 MiB response cap, status validation, and decoding only the `analysis` field. Never accept or add an API key option.
 
-- [ ] **Step 5: Run the clients under race and commit**
+- [x] **Step 5: Run the clients under race and commit**
 
 Run: `gofmt -w internal/alertmanager internal/holmes && go test -race ./internal/alertmanager ./internal/holmes && go test ./...`
 
