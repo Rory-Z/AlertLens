@@ -419,7 +419,7 @@ git commit -m "feat(session): persist state atomically"
 - Produces: Kubernetes Service port `metrics` on 9090 and PVC mount `/var/lib/alertlens`.
 - Later smoke verification supplies Slack tokens through an existing Secret and non-secret service URLs through values.
 
-- [ ] **Step 1: Write failing Helm assertions**
+- [x] **Step 1: Write failing Helm assertions**
 
 Create `charts/alertlens/tests/deployment_test.yaml` for `helm-unittest` with assertions that the Deployment:
 
@@ -451,19 +451,19 @@ tests:
           value: /var/lib/alertlens/state.json
 ```
 
-- [ ] **Step 2: Run Helm lint and verify it fails**
+- [x] **Step 2: Run Helm lint and verify it fails**
 
 Run: `helm lint charts/alertlens`
 
 Expected: FAIL because the chart does not exist.
 
-- [ ] **Step 3: Add the minimal multi-stage image**
+- [x] **Step 3: Add the minimal multi-stage image**
 
 Create a multi-stage `Dockerfile` that builds with `golang:1.22` using `CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/alertlens ./cmd/alertlens`, then copies it into `gcr.io/distroless/static-debian12:nonroot`. Run as the distroless `nonroot` user and set `ENTRYPOINT ["/alertlens"]`.
 
 Create `.dockerignore` containing only `.git`, the local binary, coverage files, and editor files.
 
-- [ ] **Step 4: Implement the minimal Helm chart**
+- [x] **Step 4: Implement the minimal Helm chart**
 
 The chart must render:
 
@@ -480,7 +480,7 @@ The chart must render:
 
 Do not add HPA, PodDisruptionBudget, ingress, autoscaling, external databases, or a values schema.
 
-- [ ] **Step 5: Validate chart rendering**
+- [x] **Step 5: Validate chart rendering**
 
 Run:
 
@@ -493,7 +493,7 @@ Expected: both commands exit 0.
 
 If the `helm-unittest` plugin is installed, also run `helm unittest charts/alertlens`; otherwise the CI workflow installs the pinned plugin before running the assertion file.
 
-- [ ] **Step 6: Add CI with the approved gates**
+- [x] **Step 6: Add CI with the approved gates**
 
 Create `.github/workflows/ci.yaml` triggered by pushes and pull requests. It checks out the repository, installs Go 1.22, Helm 3, and a pinned `helm-unittest` release, then runs:
 
@@ -509,11 +509,11 @@ helm unittest charts/alertlens
 
 Do not add a separate linter dependency in this milestone; `gofmt` and `go vet` are the requested baseline.
 
-- [ ] **Step 7: Document local startup without publishing secrets**
+- [x] **Step 7: Document local startup without publishing secrets**
 
 Update `README.md` with Go 1.22 prerequisites, the five required environment-variable names, `go run ./cmd/alertlens`, health endpoints, test commands, and Helm rendering commands. Use placeholder values and never include a real Slack token or kubeconfig path.
 
-- [ ] **Step 8: Run the complete milestone gate**
+- [x] **Step 8: Run the complete milestone gate**
 
 Run:
 
@@ -529,11 +529,15 @@ helm template alertlens charts/alertlens --set slack.existingSecret=alertlens-sl
 
 Expected: every command exits 0 and total statement coverage is at least 90%.
 
-- [ ] **Step 9: Commit the deployable foundation**
+- [x] **Step 9: Commit the deployable foundation**
 
-```bash
-git add Dockerfile .dockerignore .github charts README.md
-git commit -m "build(helm): package AlertLens for Kubernetes"
+The implementation was kept reviewable in these Conventional Commits:
+
+```text
+test(core): cover configuration and state failures
+build(helm): package service for Kubernetes
+ci(github): verify Go, Helm, and image builds
+docs(readme): document development checks
 ```
 
 ---
