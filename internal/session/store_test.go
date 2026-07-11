@@ -98,6 +98,45 @@ func TestStoreRejectsInvalidSnapshots(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsInvalidPaths(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		if _, err := Open("", nil); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("parent is a file", func(t *testing.T) {
+		parent := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(parent, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(filepath.Join(parent, "state.json"), nil); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("state path is a directory", func(t *testing.T) {
+		if _, err := Open(t.TempDir(), nil); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestOpenInitializesNullMapsWithDefaultClock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"sessions":null,"eventIds":null}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := store.Snapshot()
+	if got.Sessions == nil || got.EventIDs == nil {
+		t.Fatalf("maps were not initialized: %#v", got)
+	}
+}
+
 func TestOpenPrunesExpiredState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := `{
@@ -140,6 +179,20 @@ func TestUpdateCallbackErrorLeavesStateUnchanged(t *testing.T) {
 	}
 	if err := store.Ready(); err != nil {
 		t.Fatalf("callback error degraded readiness: %v", err)
+	}
+}
+
+func TestUpdateEncodeFailureDegradesReadiness(t *testing.T) {
+	store := openTestStore(t)
+	err := store.Update(func(snapshot *Snapshot) error {
+		snapshot.Sessions["bad"] = Record{Key: "bad", AlertContext: []byte("{")}
+		return nil
+	})
+	if err == nil || store.Ready() == nil {
+		t.Fatalf("update error = %v, ready error = %v", err, store.Ready())
+	}
+	if len(store.Snapshot().Sessions) != 0 {
+		t.Fatalf("failed update changed memory: %#v", store.Snapshot())
 	}
 }
 
