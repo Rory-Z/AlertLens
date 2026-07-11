@@ -39,8 +39,14 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.SlackBotToken, err = required(getenv, "SLACK_BOT_TOKEN"); err != nil {
 		return Config{}, err
 	}
+	if !strings.HasPrefix(cfg.SlackBotToken, "xoxb-") {
+		return Config{}, fmt.Errorf("SLACK_BOT_TOKEN: must be a bot token")
+	}
 	if cfg.SlackAppToken, err = required(getenv, "SLACK_APP_TOKEN"); err != nil {
 		return Config{}, err
+	}
+	if !strings.HasPrefix(cfg.SlackAppToken, "xapp-") {
+		return Config{}, fmt.Errorf("SLACK_APP_TOKEN: must be an app-level token")
 	}
 	if cfg.AlertChannels, err = channels(getenv("SLACK_ALERT_CHANNELS")); err != nil {
 		return Config{}, fmt.Errorf("SLACK_ALERT_CHANNELS: %w", err)

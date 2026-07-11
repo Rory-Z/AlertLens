@@ -122,6 +122,18 @@ func TestLoadRejectsInvalidValuesWithoutLeakingSecrets(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsWrongSlackTokenTypes(t *testing.T) {
+	for _, key := range []string{"SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"} {
+		t.Run(key, func(t *testing.T) {
+			env := maps.Clone(validEnv())
+			env[key] = "wrong-token-type"
+			if _, err := Load(mapEnv(env)); err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
 func validEnv() map[string]string {
 	return map[string]string{
 		"SLACK_BOT_TOKEN":      "xoxb-test",

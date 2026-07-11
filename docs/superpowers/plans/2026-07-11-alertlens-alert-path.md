@@ -295,13 +295,13 @@ git commit -m "feat(service): process firing alerts"
 - Implements: `service.Slack` through Slack Web API calls.
 - Produces: `slackadapter.New(botToken, appToken string, channels map[string]bool) *Client`, `(*Client).Run(context.Context, handler) error`, and `(*Client).Ready() error`.
 
-- [ ] **Step 1: Add the supported Slack SDK**
+- [x] **Step 1: Add the supported Slack SDK**
 
 Run: `go get github.com/slack-go/slack@v0.27.0`
 
 Expected: `go.mod` and `go.sum` record v0.27.0 and its WebSocket dependency without changing the Go 1.25 baseline.
 
-- [ ] **Step 2: Write failing event translation and Web API tests**
+- [x] **Step 2: Write failing event translation and Web API tests**
 
 Test pure message translation for top-level text plus all attachment text, event ID/channel/timestamps, bot messages, thread messages, edited/deleted subtype rejection, unmonitored channel rejection, and self-user rejection. Use a Slack API `httptest.Server` to assert:
 
@@ -311,7 +311,7 @@ Test pure message translation for top-level text plus all attachment text, event
 
 Add config tests rejecting non-`xoxb-` bot tokens and non-`xapp-` app tokens, following the Slack SDK's official Socket Mode example.
 
-- [ ] **Step 3: Verify RED and implement the adapter**
+- [x] **Step 3: Verify RED and implement the adapter**
 
 Run: `go test ./internal/slack ./internal/config`
 
@@ -321,7 +321,7 @@ Construct one `slack.Client` with `slack.OptionAppLevelToken`, then one `socketm
 
 Use `AddReactionContext`, `RemoveReactionContext`, and `PostMessageContext` with `slack.MsgOptionTS`. Treat `already_reacted` and `no_reaction` as success; return other errors so the service can count them later while continuing its main flow.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `gofmt -w internal/slack internal/config && go test -race ./internal/slack ./internal/config && go test ./...`
 
