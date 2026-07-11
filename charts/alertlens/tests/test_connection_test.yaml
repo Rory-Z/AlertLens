@@ -1,0 +1,16 @@
+suite: test connection
+templates:
+  - templates/tests/test-connection.yaml
+tests:
+  - it: is not selected by the workload egress policy
+    set:
+      slack.existingSecret: alertlens-slack
+      slack.alertChannels:
+        - C1
+      alertmanagerURL: http://alertmanager:9093
+      holmesURL: http://holmes:5050
+    asserts:
+      - notExists:
+          path: metadata.labels["app.kubernetes.io/name"]
+      - notExists:
+          path: metadata.labels["app.kubernetes.io/instance"]
