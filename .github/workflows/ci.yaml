@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-go@v6.5.0
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
       - name: Verify Go
         run: |
           test -z "$(gofmt -l .)"
