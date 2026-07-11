@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -15,16 +16,34 @@ func TestRunRejectsInvalidConfig(t *testing.T) {
 func TestRunReturnsListenError(t *testing.T) {
 	env := validEnv(t)
 	env["METRICS_ADDR"] = "bad address"
-	if err := run(context.Background(), mapEnv(env)); err == nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := run(ctx, mapEnv(env)); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestRunShutsDownWithContext(t *testing.T) {
+	env := validEnv(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := run(ctx, mapEnv(validEnv(t))); err != nil {
+	if err := run(ctx, mapEnv(env)); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(env["STATE_PATH"]); err != nil {
+		t.Fatalf("state was not initialized: %v", err)
+	}
+}
+
+func TestRunRejectsCorruptState(t *testing.T) {
+	env := validEnv(t)
+	if err := os.WriteFile(env["STATE_PATH"], []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := run(ctx, mapEnv(env)); err == nil {
+		t.Fatal("expected error")
 	}
 }
 

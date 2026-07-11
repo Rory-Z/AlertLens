@@ -14,6 +14,7 @@ import (
 
 	"github.com/emqx/alertlens/internal/config"
 	"github.com/emqx/alertlens/internal/health"
+	"github.com/emqx/alertlens/internal/session"
 )
 
 func main() {
@@ -30,13 +31,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	store, err := session.Open(cfg.StatePath, time.Now)
+	if err != nil {
+		return fmt.Errorf("open state: %w", err)
+	}
 
 	listener, err := net.Listen("tcp", cfg.MetricsAddr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
 	srv := &http.Server{
-		Handler:           health.New(func() error { return nil }),
+		Handler:           health.New(store.Ready),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)

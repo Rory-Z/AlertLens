@@ -271,7 +271,7 @@ git commit -m "feat(core): add Go service foundation"
 - Produces: `(*session.Store).Ready() error`
 - Later milestones update all session and dedup state through `Store.Update`.
 
-- [ ] **Step 1: Write failing persistence integration tests**
+- [x] **Step 1: Write failing persistence integration tests**
 
 Create `internal/session/store_test.go` with subtests for:
 
@@ -313,13 +313,13 @@ func TestStoreRoundTrip(t *testing.T) {
 
 Add cases that assert `Open` rejects corrupt JSON and a future snapshot version, prunes expired event IDs and sessions, and leaves the old file unchanged when the update callback returns an error. Add a write-failure case that makes the directory read-only before `Update`, expects `Ready()` to become non-nil, restores permissions, performs a successful update, and expects readiness to recover. Skip that permission-specific case when `os.Geteuid() == 0` because root bypasses directory permissions.
 
-- [ ] **Step 2: Run the store test and verify it fails**
+- [x] **Step 2: Run the store test and verify it fails**
 
 Run: `go test ./internal/session`
 
 Expected: FAIL because the session types and `Open` do not exist.
 
-- [ ] **Step 3: Define the minimal versioned snapshot model**
+- [x] **Step 3: Define the minimal versioned snapshot model**
 
 Create `internal/session/model.go`:
 
@@ -354,7 +354,7 @@ type ConversationTurn struct {
 
 Do not add PagerDuty fields, provider interfaces, database adapters, or migration machinery for nonexistent versions.
 
-- [ ] **Step 4: Implement serialized atomic persistence**
+- [x] **Step 4: Implement serialized atomic persistence**
 
 Create `internal/session/store.go` with a `sync.Mutex`, in-memory snapshot, state path, clock function, and readiness error. `Open` creates the parent directory when absent, verifies it is writable by creating and removing a temporary file, reads an existing snapshot when present, rejects corrupt or unsupported versions, initializes maps, prunes records whose non-zero `ExpiresAt` is not after `now()`, prunes expired event IDs, and persists the pruned result.
 
@@ -370,23 +370,23 @@ Create `internal/session/store.go` with a `sync.Mutex`, in-memory snapshot, stat
 
 Use only `os`, `encoding/json`, `path/filepath`, `sync`, and other standard-library packages. Remove the temporary file on every failure path.
 
-- [ ] **Step 5: Run session tests**
+- [x] **Step 5: Run session tests**
 
 Run: `go test ./internal/session`
 
 Expected: PASS, with the permission test skipped only when running as root.
 
-- [ ] **Step 6: Wire store readiness into startup**
+- [x] **Step 6: Wire store readiness into startup**
 
 Modify `run` in `cmd/alertlens/main.go` to open the store before serving and construct the health handler with `store.Ready`. Startup must return the `Open` error. Do not expose the state path through HTTP or logs.
 
-- [ ] **Step 7: Verify durable readiness and the full repository**
+- [x] **Step 7: Verify durable readiness and the full repository**
 
 Run: `gofmt -w cmd internal && go test -race ./... && go build ./cmd/alertlens`
 
 Expected: PASS with no race reports.
 
-- [ ] **Step 8: Commit durable state**
+- [x] **Step 8: Commit durable state**
 
 ```bash
 git add cmd/alertlens internal/session internal/health
