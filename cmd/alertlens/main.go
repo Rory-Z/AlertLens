@@ -52,6 +52,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			QueueSize: cfg.EventQueueSize, Workers: cfg.HolmesMaxConcurrency,
 			EventDedupTTL:   cfg.EventDedupTTL,
 			AlertSessionTTL: cfg.AlertSessionTTL, ResolvedSessionTTL: cfg.ResolvedSessionTTL,
+			AdhocSessionTTL: cfg.AdhocSessionTTL, ConversationMaxTurns: cfg.ConversationMaxTurns,
 			AlertPayloadMaxBytes: cfg.AlertPayloadMaxBytes,
 			RunbookMaxBytes:      cfg.RunbookMaxBytes, ConversationMaxBytes: cfg.ConversationMaxBytes,
 			SlackOutputMaxChars: cfg.SlackOutputMaxChars,

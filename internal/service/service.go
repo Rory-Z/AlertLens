@@ -44,8 +44,10 @@ type Config struct {
 	EventDedupTTL        time.Duration
 	AlertSessionTTL      time.Duration
 	ResolvedSessionTTL   time.Duration
+	AdhocSessionTTL      time.Duration
 	AlertPayloadMaxBytes int
 	RunbookMaxBytes      int
+	ConversationMaxTurns int
 	ConversationMaxBytes int
 	SlackOutputMaxChars  int
 }
@@ -53,6 +55,7 @@ type Config struct {
 type work struct {
 	event    Event
 	identity marker.Alert
+	mention  bool
 }
 
 type Service struct {
@@ -80,7 +83,7 @@ func New(store *session.Store, alertmanager Alertmanager, holmes Holmes, slack S
 
 func (s *Service) Submit(ctx context.Context, event Event) bool {
 	identity, ok := marker.Parse(event.Text)
-	if !ok {
+	if !ok && !event.Mention {
 		s.metrics.Event("ignored")
 		return false
 	}
@@ -107,7 +110,7 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 	}
 	s.addReaction(ctx, "eyes", event.Channel, event.TS)
 	select {
-	case s.queue <- work{event: event, identity: identity}:
+	case s.queue <- work{event: event, identity: identity, mention: !ok && event.Mention}:
 		s.metrics.Event("accepted")
 		s.metrics.QueueDepth(len(s.queue))
 		return true
@@ -155,6 +158,10 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 func (s *Service) handle(ctx context.Context, item work) {
+	if item.mention {
+		s.handleMention(ctx, item.event)
+		return
+	}
 	lock := &s.sessionLocks[sessionShard(item.identity.Key())]
 	lock.Lock()
 	defer lock.Unlock()
@@ -244,6 +251,101 @@ func (s *Service) handle(ctx context.Context, item work) {
 	}
 	s.metrics.Event("firing")
 	s.transition(ctx, item.event, "hourglass_flowing_sand", "white_check_mark")
+}
+
+func (s *Service) handleMention(ctx context.Context, event Event) {
+	parentTS := event.ThreadTS
+	if parentTS == "" {
+		parentTS = event.TS
+	}
+	key, record, exists := findThreadSession(s.store.Snapshot(), event.Channel, parentTS)
+	if !exists {
+		key = "slack:" + event.Channel + ":" + parentTS
+	}
+	lock := &s.sessionLocks[sessionShard(key)]
+	lock.Lock()
+	defer lock.Unlock()
+	key, record, exists = findThreadSession(s.store.Snapshot(), event.Channel, parentTS)
+	if !exists {
+		key = "slack:" + event.Channel + ":" + parentTS
+		record = session.Record{
+			Key: key, Type: "adhoc", State: "active", Channel: event.Channel,
+			ParentTS: parentTS, ThreadTS: parentTS, CreatedAt: s.now(),
+		}
+	}
+	prior := append([]session.ConversationTurn(nil), record.Conversation...)
+	record.Conversation = boundConversation(append(record.Conversation,
+		session.ConversationTurn{Role: "user", Content: event.Text}),
+		s.config.ConversationMaxTurns, s.config.ConversationMaxBytes)
+	record.UpdatedAt = s.now()
+	if record.Type == "adhoc" {
+		record.ExpiresAt = record.UpdatedAt.Add(s.config.AdhocSessionTTL)
+	} else {
+		record.ExpiresAt = record.UpdatedAt.Add(s.config.AlertSessionTTL)
+	}
+	if err := s.store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions[key] = record
+		return nil
+	}); err != nil {
+		s.metrics.PersistenceError()
+		s.metrics.Event("failed")
+		s.transition(ctx, event, "eyes", "x")
+		return
+	}
+	ask := "<untrusted_user_question>\n" + truncateBytes(event.Text, s.config.ConversationMaxBytes) + "\n</untrusted_user_question>"
+	requestSource := "freeform"
+	if record.Type == "alert" {
+		requestSource = "alert_followup"
+		ask = "<alertmanager_alerts>\n" + string(record.AlertContext) + "\n</alertmanager_alerts>\n" + ask
+	}
+	request := holmes.Request{
+		Ask: ask, ConversationHistory: conversationHistory(prior),
+		AdditionalSystemPrompt: investigationSystemPrompt,
+		RequestSource:          requestSource, SourceRef: key, ConversationID: key,
+	}
+	s.transition(ctx, event, "eyes", "hourglass_flowing_sand")
+	s.metrics.HolmesActive(1)
+	started := time.Now()
+	answer, err := s.holmes.Chat(ctx, request)
+	s.metrics.HolmesActive(-1)
+	if err != nil {
+		s.metrics.Holmes("error", time.Since(started))
+		s.metrics.Event("failed")
+		s.transition(ctx, event, "hourglass_flowing_sand", "x")
+		return
+	}
+	s.metrics.Holmes("success", time.Since(started))
+	answer = truncateSlack(sanitize(answer), s.config.SlackOutputMaxChars)
+	if err := s.slack.Reply(ctx, event.Channel, parentTS, answer); err != nil {
+		s.metrics.Event("failed")
+		s.transition(ctx, event, "hourglass_flowing_sand", "x")
+		return
+	}
+	if err := s.store.Update(func(snapshot *session.Snapshot) error {
+		record := snapshot.Sessions[key]
+		record.Conversation = boundConversation(append(record.Conversation,
+			session.ConversationTurn{Role: "assistant", Content: answer}),
+			s.config.ConversationMaxTurns, s.config.ConversationMaxBytes)
+		record.UpdatedAt = s.now()
+		snapshot.Sessions[key] = record
+		return nil
+	}); err != nil {
+		s.metrics.PersistenceError()
+		s.metrics.Event("failed")
+		s.transition(ctx, event, "hourglass_flowing_sand", "x")
+		return
+	}
+	s.metrics.Event(requestSource)
+	s.transition(ctx, event, "hourglass_flowing_sand", "white_check_mark")
+}
+
+func findThreadSession(snapshot session.Snapshot, channel, parentTS string) (string, session.Record, bool) {
+	for key, record := range snapshot.Sessions {
+		if record.Channel == channel && (record.ThreadTS == parentTS || record.ParentTS == parentTS) {
+			return key, record, true
+		}
+	}
+	return "", session.Record{}, false
 }
 
 func sessionShard(key string) uint32 {

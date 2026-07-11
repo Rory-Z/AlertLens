@@ -60,14 +60,14 @@ git commit -m "feat(slack): translate explicit app mentions"
 - Adds `AdhocSessionTTL time.Duration` and `ConversationMaxTurns int` to `service.Config`.
 - Adds a private mention work type carrying the selected session key, parent thread, prior alert context, and bounded conversation.
 
-- [ ] Write a failing top-level ad-hoc integration test: explicit mention at `C1/10.1` persists `slack:C1:10.1` before Holmes, sends `request_source=freeform`, replies in thread `10.1`, and persists the user question plus final answer.
-- [ ] Implement top-level and unknown-thread session creation with `Type=adhoc`, `State=active`, and idle expiry.
-- [ ] Write a failing known-alert-thread test: seed `am:A:ns` at thread `100.1`, mention in that thread, and assert Holmes receives the stored alert JSON and conversation under the same `am:A:ns` conversation ID.
-- [ ] Implement session lookup by `Channel` and `ThreadTS`/`ParentTS`; serialize through the existing session lock shard.
-- [ ] Add tests for unknown-thread ad-hoc, ignored unmentioned human messages, Holmes/reply/persistence failures, and repeated explicit questions.
-- [ ] Add pure conversation tests for six-message and 16384-byte pruning. `conversation_history` begins with `{role:"system"}` and then bounded prior user/assistant messages; current question stays in `ask`.
-- [ ] Wire `ADHOC_SESSION_TTL` and `CONVERSATION_MAX_TURNS` from application config, then run race and coverage gates.
-- [ ] Commit:
+- [x] Write a failing top-level ad-hoc integration test: explicit mention at `C1/10.1` persists `slack:C1:10.1` before Holmes, sends `request_source=freeform`, replies in thread `10.1`, and persists the user question plus final answer.
+- [x] Implement top-level and unknown-thread session creation with `Type=adhoc`, `State=active`, and idle expiry.
+- [x] Write a failing known-alert-thread test: seed `am:A:ns` at thread `100.1`, mention in that thread, and assert Holmes receives the stored alert JSON and conversation under the same `am:A:ns` conversation ID.
+- [x] Implement session lookup by `Channel` and `ThreadTS`/`ParentTS`; serialize through the existing session lock shard.
+- [x] Add tests for unknown-thread ad-hoc, ignored unmentioned human messages, Holmes/reply/persistence failures, and repeated explicit questions.
+- [x] Add pure conversation tests for six-message and 16384-byte pruning. `conversation_history` begins with `{role:"system"}` and then bounded prior user/assistant messages; current question stays in `ask`.
+- [x] Wire `ADHOC_SESSION_TTL` and `CONVERSATION_MAX_TURNS` from application config, then run race and coverage gates.
+- [x] Commit:
 
 ```bash
 git add internal/service cmd/alertlens

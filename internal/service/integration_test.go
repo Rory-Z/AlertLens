@@ -564,6 +564,127 @@ func TestReactionFailureDoesNotFailRCA(t *testing.T) {
 	}
 }
 
+func TestTopLevelMentionCreatesAdhocSession(t *testing.T) {
+	requestCh := make(chan holmes.Request, 1)
+	slack := &fakeSlack{}
+	var store *session.Store
+	service, store := startBehaviorService(t, nil,
+		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+			if record := storeSnapshotSession(store, "slack:C1:10.1"); record.Type != "adhoc" || len(record.Conversation) != 1 {
+				t.Errorf("session before Holmes = %#v", record)
+			}
+			requestCh <- request
+			return "check deployment logs", nil
+		}), slack,
+	)
+	if !service.Submit(context.Background(), Event{
+		ID: "EvAdhoc", Channel: "C1", User: "U1", Text: "what is wrong with prod?", TS: "10.1", Mention: true,
+	}) {
+		t.Fatal("mention rejected")
+	}
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:10.1") })
+	request := <-requestCh
+	if request.RequestSource != "freeform" || request.SourceRef != "slack:C1:10.1" ||
+		request.ConversationID != "slack:C1:10.1" || request.Ask != "<untrusted_user_question>\nwhat is wrong with prod?\n</untrusted_user_question>" {
+		t.Fatalf("request = %#v", request)
+	}
+	if got := slack.replyLog(); len(got) != 1 || got[0] != "C1:10.1:check deployment logs" {
+		t.Fatalf("replies = %#v", got)
+	}
+	record := store.Snapshot().Sessions["slack:C1:10.1"]
+	if record.Type != "adhoc" || record.ParentTS != "10.1" || len(record.Conversation) != 2 ||
+		record.Conversation[0].Role != "user" || record.Conversation[1].Role != "assistant" {
+		t.Fatalf("record = %#v", record)
+	}
+}
+
+func TestMentionInKnownAlertThreadReusesContext(t *testing.T) {
+	requestCh := make(chan holmes.Request, 1)
+	slack := &fakeSlack{}
+	service, store := startBehaviorService(t, nil,
+		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+			requestCh <- request
+			return "follow-up answer", nil
+		}), slack,
+	)
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "active", Channel: "C1",
+			ParentTS: "100.1", ThreadTS: "100.1", AlertContext: json.RawMessage(`{"alerts":[{"labels":{"alertname":"A"}}]}`),
+			Conversation: []session.ConversationTurn{{Role: "assistant", Content: "initial RCA"}},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service.Submit(context.Background(), Event{
+		ID: "EvFollow", Channel: "C1", User: "U1", Text: "show logs", TS: "101.1", ThreadTS: "100.1", Mention: true,
+	})
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:101.1") })
+	request := <-requestCh
+	if request.RequestSource != "alert_followup" || request.SourceRef != "am:A:ns" ||
+		!strings.Contains(request.Ask, `"alertname":"A"`) || len(request.ConversationHistory) != 2 || request.ConversationHistory[0].Role != "system" {
+		t.Fatalf("request = %#v", request)
+	}
+	if got := slack.replyLog(); len(got) != 1 || got[0] != "C1:100.1:follow-up answer" {
+		t.Fatalf("replies = %#v", got)
+	}
+}
+
+func TestMentionInUnknownThreadCreatesAdhocSessionThere(t *testing.T) {
+	slack := &fakeSlack{}
+	service, store := startBehaviorService(t, nil,
+		holmesFunc(func(context.Context, holmes.Request) (string, error) { return "answer", nil }), slack,
+	)
+	service.Submit(context.Background(), Event{
+		ID: "EvUnknown", Channel: "C1", Text: "investigate", TS: "101.1", ThreadTS: "99.1", Mention: true,
+	})
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:101.1") })
+	if record := store.Snapshot().Sessions["slack:C1:99.1"]; record.Type != "adhoc" || record.ParentTS != "99.1" {
+		t.Fatalf("record = %#v", record)
+	}
+}
+
+func TestMentionOperationFailuresEndWithX(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		holmesErr error
+		replyErr  error
+	}{
+		{name: "Holmes", holmesErr: errors.New("Holmes unavailable")},
+		{name: "reply", replyErr: errors.New("Slack unavailable")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			slack := &fakeSlack{replyErr: tt.replyErr}
+			service, _ := startBehaviorService(t, nil,
+				holmesFunc(func(context.Context, holmes.Request) (string, error) { return "answer", tt.holmesErr }), slack,
+			)
+			service.Submit(context.Background(), Event{
+				ID: "Ev" + tt.name, Channel: "C1", Text: "question", TS: "1", Mention: true,
+			})
+			waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
+		})
+	}
+}
+
+func TestRepeatedExplicitQuestionExtendsConversation(t *testing.T) {
+	slack := &fakeSlack{}
+	service, store := startBehaviorService(t, nil,
+		holmesFunc(func(context.Context, holmes.Request) (string, error) { return "answer", nil }), slack,
+	)
+	service.Submit(context.Background(), Event{ID: "Ev1", Channel: "C1", Text: "first", TS: "10", Mention: true})
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:10") })
+	service.Submit(context.Background(), Event{ID: "Ev2", Channel: "C1", Text: "second", TS: "11", ThreadTS: "10", Mention: true})
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:11") })
+	if got := store.Snapshot().Sessions["slack:C1:10"].Conversation; len(got) != 4 {
+		t.Fatalf("conversation = %#v", got)
+	}
+}
+
+func storeSnapshotSession(store *session.Store, key string) session.Record {
+	return store.Snapshot().Sessions[key]
+}
+
 func startBehaviorService(t *testing.T, am Alertmanager, h Holmes, slack *fakeSlack) (*Service, *session.Store) {
 	t.Helper()
 	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
@@ -574,6 +695,7 @@ func startBehaviorService(t *testing.T, am Alertmanager, h Holmes, slack *fakeSl
 	service := New(store, am, h, slack, Config{
 		QueueSize: 10, Workers: 1, EventDedupTTL: 10 * time.Minute,
 		AlertSessionTTL: 24 * time.Hour, ResolvedSessionTTL: 24 * time.Hour,
+		AdhocSessionTTL: 8 * time.Hour, ConversationMaxTurns: 6,
 		AlertPayloadMaxBytes: 32768, RunbookMaxBytes: 8192,
 		ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
 	}, func() time.Time { return now }, nil)
