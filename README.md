@@ -4,7 +4,7 @@ Alertmanager-first HolmesGPT RCA companion for Slack.
 
 AlertLens is designed to keep the existing **Alertmanager -> Slack** notification path as the source of truth. Alertmanager posts the authoritative alert message to Slack; AlertLens listens to that Slack message, enriches it, asks HolmesGPT for RCA, and posts concise analysis into the same thread.
 
-The firing and resolved alert paths are implemented; ad-hoc questions and thread follow-ups are being built in a later verified milestone. See the [approved design](docs/superpowers/specs/2026-07-11-alertlens-design.md) for the complete MVP contract.
+The firing, resolved, ad-hoc, and thread follow-up paths are implemented. See the [approved design](docs/superpowers/specs/2026-07-11-alertlens-design.md) for the complete MVP contract.
 
 Current alert behavior:
 
@@ -13,6 +13,10 @@ Current alert behavior:
 - confirmed resolution replies in the original thread and adds `large_green_circle`
 - Slack event-ID deduplication and thread/session state survive a single-replica restart
 - Watchdog updates metrics without invoking HolmesGPT
+- a top-level `@AlertLens` creates an ad-hoc thread
+- an explicit mention in a known alert thread reuses its alert and conversation context
+- an explicit mention in an unknown thread creates ad-hoc context on that thread
+- human messages without an explicit mention are ignored
 
 ## Slack app
 

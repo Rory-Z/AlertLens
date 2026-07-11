@@ -82,9 +82,9 @@ git commit -m "feat(service): answer ad-hoc and follow-up questions"
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-07-11-alertlens-adhoc-followup.md`
 
-- [ ] Document top-level, known-thread, and unknown-thread mention behavior and explicitly state that unmentioned messages are ignored.
-- [ ] Run gofmt, vet, race+coverage >=90%, build, Helm lint/unit, actionlint, Docker build, and Kubernetes server-side dry-run.
-- [ ] Mark this plan complete and commit:
+- [x] Document top-level, known-thread, and unknown-thread mention behavior and explicitly state that unmentioned messages are ignored.
+- [x] Run gofmt, vet, race+coverage >=90%, build, Helm lint/unit, actionlint, Docker build, and Kubernetes server-side dry-run.
+- [x] Mark this plan complete and commit:
 
 ```bash
 git add README.md docs/superpowers/plans/2026-07-11-alertlens-adhoc-followup.md
