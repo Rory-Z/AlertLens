@@ -6,7 +6,7 @@
 
 **Architecture:** This is milestone 1 of 4. Keep startup wiring in `cmd/alertlens`, parse environment variables with the standard library, and store one versioned JSON snapshot through a concrete filesystem store. Later milestones add the Slack/Alertmanager/Holmes flow without changing these boundaries.
 
-**Tech Stack:** Go 1.22, standard library, Docker, Helm 3, GitHub Actions.
+**Tech Stack:** Go 1.25, standard library, Docker, Helm 3, GitHub Actions.
 
 ## Global Constraints
 
@@ -51,7 +51,9 @@
 ```go
 module github.com/emqx/alertlens
 
-go 1.22
+go 1.25.0
+
+toolchain go1.25.12
 ```
 
 - [x] **Step 2: Write failing table tests for required configuration and defaults**
@@ -459,7 +461,7 @@ Expected: FAIL because the chart does not exist.
 
 - [x] **Step 3: Add the minimal multi-stage image**
 
-Create a multi-stage `Dockerfile` that builds with `golang:1.22` using `CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/alertlens ./cmd/alertlens`, then copies it into `gcr.io/distroless/static-debian12:nonroot`. Run as the distroless `nonroot` user and set `ENTRYPOINT ["/alertlens"]`.
+Create a multi-stage `Dockerfile` that builds with `golang:1.25.12` using `CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/alertlens ./cmd/alertlens`, then copies it into `gcr.io/distroless/static-debian12:nonroot`. Run as the distroless `nonroot` user and set `ENTRYPOINT ["/alertlens"]`.
 
 Create `.dockerignore` containing only `.git`, the local binary, coverage files, and editor files.
 
@@ -495,7 +497,7 @@ If the `helm-unittest` plugin is installed, also run `helm unittest charts/alert
 
 - [x] **Step 6: Add CI with the approved gates**
 
-Create `.github/workflows/ci.yaml` triggered by pushes and pull requests. It checks out the repository, installs Go 1.22, Helm 3, and a pinned `helm-unittest` release, then runs:
+Create `.github/workflows/ci.yaml` triggered by pushes and pull requests. It checks out the repository, installs Go 1.25, Helm 3, and a pinned `helm-unittest` release, then runs:
 
 ```bash
 test -z "$(gofmt -l .)"
@@ -511,7 +513,7 @@ Do not add a separate linter dependency in this milestone; `gofmt` and `go vet` 
 
 - [x] **Step 7: Document local startup without publishing secrets**
 
-Update `README.md` with Go 1.22 prerequisites, the five required environment-variable names, `go run ./cmd/alertlens`, health endpoints, test commands, and Helm rendering commands. Use placeholder values and never include a real Slack token or kubeconfig path.
+Update `README.md` with Go 1.25 prerequisites, the five required environment-variable names, `go run ./cmd/alertlens`, health endpoints, test commands, and Helm rendering commands. Use placeholder values and never include a real Slack token or kubeconfig path.
 
 - [x] **Step 8: Run the complete milestone gate**
 

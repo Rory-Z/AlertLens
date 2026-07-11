@@ -8,7 +8,7 @@ The implementation is being built in verified milestones. See the [approved desi
 
 ## Development
 
-Go 1.22 or newer is required. The service reads configuration from the environment; the required names are:
+Go 1.25 or newer is required. The service reads configuration from the environment; the required names are:
 
 - `SLACK_BOT_TOKEN`
 - `SLACK_APP_TOKEN`
