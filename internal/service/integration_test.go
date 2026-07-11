@@ -256,6 +256,109 @@ func TestNoMatchingAlertRemovesReceivedReaction(t *testing.T) {
 	}
 }
 
+func TestConfirmedResolutionUpdatesOriginalThread(t *testing.T) {
+	var holmesCalls atomic.Int32
+	slack := &fakeSlack{}
+	service, store := startBehaviorService(t,
+		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) { return nil, nil }),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			holmesCalls.Add(1)
+			return "unexpected", nil
+		}),
+		slack,
+	)
+	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "active", Channel: "C1",
+			ParentTS: "100.1", ThreadTS: "100.1", CreatedAt: now, UpdatedAt: now,
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service.Submit(context.Background(), Event{
+		Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace=ns -->`, TS: "200.1",
+	})
+	waitFor(t, func() bool { return slack.hasReaction("add:large_green_circle:C1:100.1") })
+	if holmesCalls.Load() != 0 {
+		t.Fatalf("Holmes calls = %d", holmesCalls.Load())
+	}
+	wantReactions := []string{
+		"add:eyes:C1:200.1",
+		"remove:eyes:C1:200.1",
+		"add:large_green_circle:C1:200.1",
+		"add:large_green_circle:C1:100.1",
+	}
+	if got := slack.reactionLog(); !equalStrings(got, wantReactions) {
+		t.Fatalf("reactions = %#v, want %#v", got, wantReactions)
+	}
+	wantReply := "C1:100.1:🟢 Alertmanager confirms this alert is resolved."
+	if got := slack.replyLog(); len(got) != 1 || got[0] != wantReply {
+		t.Fatalf("replies = %#v", got)
+	}
+	record := store.Snapshot().Sessions["am:A:ns"]
+	if record.State != "resolved" || !record.ExpiresAt.Equal(now.Add(24*time.Hour)) {
+		t.Fatalf("record = %#v", record)
+	}
+}
+
+func TestAlreadyResolvedNotificationStaysQuiet(t *testing.T) {
+	slack := &fakeSlack{}
+	service, store := startBehaviorService(t,
+		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) { return nil, nil }),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			t.Fatal("Holmes must not be called")
+			return "", nil
+		}),
+		slack,
+	)
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "resolved", Channel: "C1", ParentTS: "100.1",
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service.Submit(context.Background(), Event{
+		Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace=ns -->`, TS: "200.1",
+	})
+	waitFor(t, func() bool { return slack.hasReaction("remove:eyes:C1:200.1") })
+	if len(slack.replyLog()) != 0 || slack.hasReaction("add:large_green_circle:C1:200.1") {
+		t.Fatalf("replies = %#v, reactions = %#v", slack.replyLog(), slack.reactionLog())
+	}
+}
+
+func TestFiringAlertReopensResolvedSession(t *testing.T) {
+	var holmesCalls atomic.Int32
+	slack := &fakeSlack{}
+	service, store := startBehaviorService(t,
+		activeAlertmanager("A", "ns"),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			holmesCalls.Add(1)
+			return "new answer", nil
+		}),
+		slack,
+	)
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "resolved", Channel: "C1", ParentTS: "100.1",
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service.Submit(context.Background(), Event{
+		Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace=ns -->`, TS: "300.1",
+	})
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:300.1") })
+	record := store.Snapshot().Sessions["am:A:ns"]
+	if holmesCalls.Load() != 1 || record.State != "active" || record.ParentTS != "300.1" {
+		t.Fatalf("Holmes calls = %d, record = %#v", holmesCalls.Load(), record)
+	}
+}
+
 func TestReplyFailureEndsWithFailureReaction(t *testing.T) {
 	slack := &fakeSlack{replyErr: errors.New("Slack unavailable")}
 	service, store := startBehaviorService(t,
@@ -292,7 +395,7 @@ func startBehaviorService(t *testing.T, am Alertmanager, h Holmes, slack *fakeSl
 		t.Fatal(err)
 	}
 	service := New(store, am, h, slack, Config{
-		QueueSize: 10, Workers: 1, AlertSessionTTL: 24 * time.Hour,
+		QueueSize: 10, Workers: 1, AlertSessionTTL: 24 * time.Hour, ResolvedSessionTTL: 24 * time.Hour,
 		AlertPayloadMaxBytes: 32768, RunbookMaxBytes: 8192,
 		ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
 	}, func() time.Time { return now })

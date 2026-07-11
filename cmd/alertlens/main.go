@@ -47,8 +47,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slackClient,
 		service.Config{
 			QueueSize: cfg.EventQueueSize, Workers: cfg.HolmesMaxConcurrency,
-			AlertSessionTTL: cfg.AlertSessionTTL, AlertPayloadMaxBytes: cfg.AlertPayloadMaxBytes,
-			RunbookMaxBytes: cfg.RunbookMaxBytes, ConversationMaxBytes: cfg.ConversationMaxBytes,
+			AlertSessionTTL: cfg.AlertSessionTTL, ResolvedSessionTTL: cfg.ResolvedSessionTTL,
+			AlertPayloadMaxBytes: cfg.AlertPayloadMaxBytes,
+			RunbookMaxBytes:      cfg.RunbookMaxBytes, ConversationMaxBytes: cfg.ConversationMaxBytes,
 			SlackOutputMaxChars: cfg.SlackOutputMaxChars,
 		},
 		time.Now,

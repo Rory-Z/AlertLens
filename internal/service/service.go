@@ -39,6 +39,7 @@ type Config struct {
 	QueueSize            int
 	Workers              int
 	AlertSessionTTL      time.Duration
+	ResolvedSessionTTL   time.Duration
 	AlertPayloadMaxBytes int
 	RunbookMaxBytes      int
 	ConversationMaxBytes int
@@ -108,7 +109,7 @@ func (s *Service) handle(ctx context.Context, item work) {
 		return
 	}
 	if len(alerts) == 0 {
-		_ = s.slack.RemoveReaction(ctx, "eyes", item.event.Channel, item.event.TS)
+		s.resolve(ctx, item)
 		return
 	}
 	if item.identity.Alertname == "Watchdog" {
@@ -167,6 +168,36 @@ func (s *Service) handle(ctx context.Context, item work) {
 		return
 	}
 	s.transition(ctx, item.event, "hourglass_flowing_sand", "white_check_mark")
+}
+
+func (s *Service) resolve(ctx context.Context, item work) {
+	record, exists := s.store.Snapshot().Sessions[item.identity.Key()]
+	if !exists || record.State != "active" {
+		_ = s.slack.RemoveReaction(ctx, "eyes", item.event.Channel, item.event.TS)
+		return
+	}
+	threadTS := record.ThreadTS
+	if threadTS == "" {
+		threadTS = record.ParentTS
+	}
+	if err := s.slack.Reply(ctx, record.Channel, threadTS, "🟢 Alertmanager confirms this alert is resolved."); err != nil {
+		s.transition(ctx, item.event, "eyes", "x")
+		return
+	}
+	_ = s.slack.RemoveReaction(ctx, "eyes", item.event.Channel, item.event.TS)
+	_ = s.slack.AddReaction(ctx, "large_green_circle", item.event.Channel, item.event.TS)
+	_ = s.slack.AddReaction(ctx, "large_green_circle", record.Channel, record.ParentTS)
+	now := s.now()
+	if err := s.store.Update(func(snapshot *session.Snapshot) error {
+		record := snapshot.Sessions[item.identity.Key()]
+		record.State = "resolved"
+		record.UpdatedAt = now
+		record.ExpiresAt = now.Add(s.config.ResolvedSessionTTL)
+		snapshot.Sessions[item.identity.Key()] = record
+		return nil
+	}); err != nil {
+		_ = s.slack.AddReaction(ctx, "x", item.event.Channel, item.event.TS)
+	}
 }
 
 func (s *Service) transition(ctx context.Context, event Event, remove, add string) {

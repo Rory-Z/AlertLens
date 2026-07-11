@@ -34,7 +34,7 @@
 - Adds `ResolvedSessionTTL time.Duration` to `service.Config`.
 - Uses the existing session states `active` and `resolved`; no status enum package is added.
 
-- [ ] **Step 1: Write a failing confirmed-resolution integration test**
+- [x] **Step 1: Write a failing confirmed-resolution integration test**
 
 Start from an active persisted session whose original parent is `C1/100.1`. Submit a new marked event at `C1/200.1` while the Alertmanager fake returns no matches. Assert the exact additional operations:
 
@@ -48,7 +48,7 @@ add:large_green_circle:C1:100.1
 
 Assert Holmes is never called and the record is persisted as `resolved` with `ExpiresAt=now+ResolvedSessionTTL`.
 
-- [ ] **Step 2: Verify RED and implement resolution**
+- [x] **Step 2: Verify RED and implement resolution**
 
 Run: `go test ./internal/service -run TestConfirmedResolution -v`
 
@@ -56,7 +56,7 @@ Expected: FAIL because the current zero-match path only removes `eyes`.
 
 On zero matches, read the current session. If it is not active, remove `eyes` and return. If active, post the fixed resolved sentence to `record.ThreadTS` (falling back to `record.ParentTS`), perform the reactions above, then persist resolved state and timestamps. A query error continues to end in `x` without changing state.
 
-- [ ] **Step 3: Add stale, duplicate resolved, and reopen tests**
+- [x] **Step 3: Add stale, duplicate resolved, and reopen tests**
 
 Cover:
 
@@ -64,7 +64,7 @@ Cover:
 - already-resolved session + no matches: no duplicate reply;
 - resolved session + active matches: replace it with a new active claim, call Holmes once, and update the original thread anchor to the new firing parent.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `gofmt -w internal/service && go test -race ./internal/service -count=10 && go test ./...`
 
