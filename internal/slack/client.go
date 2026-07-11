@@ -105,7 +105,8 @@ func (c *Client) consume(ctx context.Context, handler func(context.Context, serv
 			switch event.Type {
 			case socketmode.EventTypeConnected:
 				c.connected.Store(true)
-			case socketmode.EventTypeConnectionError:
+			case socketmode.EventTypeConnecting, socketmode.EventTypeConnectionError,
+				socketmode.EventTypeDisconnect, socketmode.EventTypeInvalidAuth:
 				c.connected.Store(false)
 			case socketmode.EventTypeEventsAPI:
 				if event.Request == nil || c.socket.AckCtx(ctx, event.Request.EnvelopeID, nil) != nil {

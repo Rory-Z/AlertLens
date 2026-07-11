@@ -25,9 +25,11 @@ type alertPayload struct {
 }
 
 func buildRequest(event Event, identity marker.Alert, alerts []alertmanager.Alert, cfg Config) (holmes.Request, json.RawMessage) {
-	alertJSON := boundAlerts(identity, alerts, cfg.AlertPayloadMaxBytes)
-	runbooks := boundRunbooks(alerts, cfg.RunbookMaxBytes)
-	slackText := truncateBytes(event.Text, cfg.ConversationMaxBytes)
+	safeIdentity := marker.Alert{Alertname: sanitize(identity.Alertname), Namespace: sanitize(identity.Namespace)}
+	safeAlerts := sanitizeAlerts(alerts)
+	alertJSON := boundAlerts(safeIdentity, safeAlerts, cfg.AlertPayloadMaxBytes)
+	runbooks := boundRunbooks(safeAlerts, cfg.RunbookMaxBytes)
+	slackText := truncateBytes(sanitize(event.Text), cfg.ConversationMaxBytes)
 	ask := "<alertmanager_alerts>\n" + string(alertJSON) + "\n</alertmanager_alerts>\n" +
 		"<inline_runbooks>\n" + runbooks + "\n</inline_runbooks>\n" +
 		"<untrusted_slack_message>\n" + slackText + "\n</untrusted_slack_message>\n" +
@@ -40,6 +42,60 @@ func buildRequest(event Event, identity marker.Alert, alerts []alertmanager.Aler
 		SourceRef:              key,
 		ConversationID:         key,
 	}, alertJSON
+}
+
+func sanitizeAlerts(alerts []alertmanager.Alert) []alertmanager.Alert {
+	result := make([]alertmanager.Alert, len(alerts))
+	for index, alert := range alerts {
+		alert.Labels = sanitizeMap(alert.Labels)
+		alert.Annotations = sanitizeMap(alert.Annotations)
+		alert.GeneratorURL = sanitize(alert.GeneratorURL)
+		result[index] = alert
+	}
+	return result
+}
+
+func sanitizeMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = sanitize(value)
+	}
+	return result
+}
+
+func sanitizeJSON(data json.RawMessage) json.RawMessage {
+	if len(data) == 0 {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return json.RawMessage(`{}`)
+	}
+	value = sanitizeJSONValue(value)
+	result, err := json.Marshal(value)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return result
+}
+
+func sanitizeJSONValue(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return sanitize(typed)
+	case []any:
+		for index := range typed {
+			typed[index] = sanitizeJSONValue(typed[index])
+		}
+	case map[string]any:
+		for key := range typed {
+			typed[key] = sanitizeJSONValue(typed[key])
+		}
+	}
+	return value
 }
 
 func boundAlerts(identity marker.Alert, alerts []alertmanager.Alert, maxBytes int) json.RawMessage {

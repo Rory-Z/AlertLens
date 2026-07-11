@@ -598,6 +598,30 @@ func TestTopLevelMentionCreatesAdhocSession(t *testing.T) {
 	}
 }
 
+func TestExplicitMentionWinsOverPastedAlertMarker(t *testing.T) {
+	requestCh := make(chan holmes.Request, 1)
+	var alertmanagerCalls atomic.Int32
+	service, _ := startBehaviorService(t,
+		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) {
+			alertmanagerCalls.Add(1)
+			return []alertmanager.Alert{{Labels: map[string]string{"alertname": "A", "namespace": "ns"}}}, nil
+		}),
+		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+			requestCh <- request
+			return "answer", nil
+		}),
+		&fakeSlack{},
+	)
+	service.Submit(context.Background(), Event{
+		ID: "EvMentionMarker", Channel: "C1", Text: "what does this mean?\n<!-- alertlens:alertname=A,namespace=ns -->",
+		TS: "10.1", Mention: true,
+	})
+	request := <-requestCh
+	if request.RequestSource != "freeform" || alertmanagerCalls.Load() != 0 {
+		t.Fatalf("request source = %q, Alertmanager calls = %d", request.RequestSource, alertmanagerCalls.Load())
+	}
+}
+
 func TestMentionInKnownAlertThreadReusesContext(t *testing.T) {
 	requestCh := make(chan holmes.Request, 1)
 	slack := &fakeSlack{}
@@ -607,11 +631,13 @@ func TestMentionInKnownAlertThreadReusesContext(t *testing.T) {
 			return "follow-up answer", nil
 		}), slack,
 	)
+	expiresAt := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
 	if err := store.Update(func(snapshot *session.Snapshot) error {
 		snapshot.Sessions["am:A:ns"] = session.Record{
 			Key: "am:A:ns", Type: "alert", State: "active", Channel: "C1",
 			ParentTS: "100.1", ThreadTS: "100.1", AlertContext: json.RawMessage(`{"alerts":[{"labels":{"alertname":"A"}}]}`),
 			Conversation: []session.ConversationTurn{{Role: "assistant", Content: "initial RCA"}},
+			ExpiresAt:    expiresAt,
 		}
 		return nil
 	}); err != nil {
@@ -628,6 +654,192 @@ func TestMentionInKnownAlertThreadReusesContext(t *testing.T) {
 	}
 	if got := slack.replyLog(); len(got) != 1 || got[0] != "C1:100.1:follow-up answer" {
 		t.Fatalf("replies = %#v", got)
+	}
+	if got := store.Snapshot().Sessions["am:A:ns"].ExpiresAt; !got.Equal(expiresAt) {
+		t.Fatalf("alert expiry changed from %v to %v", expiresAt, got)
+	}
+}
+
+func TestMentionSanitizesQuestionBeforeHolmesAndPersistence(t *testing.T) {
+	requestCh := make(chan holmes.Request, 1)
+	service, store := startBehaviorService(t, nil,
+		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+			requestCh <- request
+			return "answer", nil
+		}), &fakeSlack{},
+	)
+	service.Submit(context.Background(), Event{
+		ID: "EvSecret", Channel: "C1", Text: "please inspect token=user-secret", TS: "10", Mention: true,
+	})
+	request := <-requestCh
+	waitFor(t, func() bool { return len(store.Snapshot().Sessions["slack:C1:10"].Conversation) == 2 })
+	record := store.Snapshot().Sessions["slack:C1:10"]
+	if strings.Contains(request.Ask, "user-secret") || strings.Contains(record.Conversation[0].Content, "user-secret") {
+		t.Fatalf("secret reached Holmes or persistence: ask=%q record=%#v", request.Ask, record)
+	}
+}
+
+func TestAdhocSessionUpdatesSessionGauge(t *testing.T) {
+	service, _ := startBehaviorService(t, nil,
+		holmesFunc(func(context.Context, holmes.Request) (string, error) { return "answer", nil }), &fakeSlack{},
+	)
+	service.Submit(context.Background(), Event{ID: "EvGauge", Channel: "C1", Text: "question", TS: "10", Mention: true})
+	waitFor(t, func() bool {
+		recorder := httptest.NewRecorder()
+		service.metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return strings.Contains(recorder.Body.String(), "alertlens_sessions 1")
+	})
+}
+
+func TestAlertLockAlsoSerializesItsSlackThread(t *testing.T) {
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, nil, nil, nil, Config{}, time.Now, nil)
+	unlock := service.lockAlertSession("am:A:ns", Event{Channel: "C1", TS: "100"})
+	defer unlock()
+	acquired := make(chan struct{})
+	go func() {
+		unlockMention := service.lockThread("C1", "100")
+		close(acquired)
+		unlockMention()
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("thread lock was acquired while its alert lock was held")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestAlertLockUsesPersistedThreadChannel(t *testing.T) {
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "active", Channel: "C0", ParentTS: "100",
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, nil, nil, nil, Config{}, time.Now, nil)
+	unlock := service.lockAlertSession("am:A:ns", Event{Channel: "C1", TS: "200"})
+	defer unlock()
+	acquired := make(chan struct{})
+	go func() {
+		unlockThread := service.lockThread("C0", "100")
+		close(acquired)
+		unlockThread()
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("persisted thread lock was acquired while its alert lock was held")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestReopenAlertLockAlsoSerializesNewThread(t *testing.T) {
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "resolved", Channel: "C0", ParentTS: "100",
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, nil, nil, nil, Config{}, time.Now, nil)
+	unlock := service.lockAlertSession("am:A:ns", Event{Channel: "C1", TS: "200"})
+	defer unlock()
+	acquired := make(chan struct{})
+	go func() {
+		unlockThread := service.lockThread("C1", "200")
+		close(acquired)
+		unlockThread()
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("new firing thread lock was acquired while reopening alert lock was held")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestPrunedSessionIsNotRecreatedAfterFollowup(t *testing.T) {
+	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "active", Channel: "C1",
+			ParentTS: "100", ThreadTS: "100", ExpiresAt: now.Add(time.Minute),
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	slack := &fakeSlack{}
+	service := New(store, nil,
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			close(started)
+			<-release
+			return "answer", nil
+		}), slack,
+		Config{
+			QueueSize: 1, Workers: 1, AdhocSessionTTL: 8 * time.Hour,
+			ConversationMaxTurns: 6, ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, func() time.Time { return now }, nil,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	service.Submit(ctx, Event{ID: "EvPrune", Channel: "C1", Text: "question", TS: "101", ThreadTS: "100", Mention: true})
+	<-started
+	if err := store.Prune(now.Add(2 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:101") })
+	if sessions := store.Snapshot().Sessions; len(sessions) != 0 {
+		t.Fatalf("expired session was recreated: %#v", sessions)
+	}
+}
+
+func TestNewSanitizesRecoveredSessionState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := session.Open(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "active",
+			AlertContext: json.RawMessage(`{"token":"token=context-secret"}`),
+			Conversation: []session.ConversationTurn{{Role: "user", Content: "password: conversation-secret"}},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = New(store, nil, nil, nil, Config{}, time.Now, nil)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"context-secret", "conversation-secret"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("recovered secret %q remains on PVC: %s", secret, data)
+		}
 	}
 }
 

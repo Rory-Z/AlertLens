@@ -328,6 +328,12 @@ func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 	if err := client.Ready(); err != nil {
 		t.Fatalf("ready = %v", err)
 	}
+	socket.events <- socketmode.Event{Type: socketmode.EventTypeConnecting}
+	waitForSlack(t, func() bool { return client.Ready() != nil })
+	socket.events <- socketmode.Event{Type: socketmode.EventTypeConnected}
+	waitForSlack(t, func() bool { return client.Ready() == nil })
+	socket.events <- socketmode.Event{Type: socketmode.EventTypeDisconnect}
+	waitForSlack(t, func() bool { return client.Ready() != nil })
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -335,6 +341,18 @@ func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 	if client.botUserID != "U_SELF" || client.Ready() == nil {
 		t.Fatalf("bot user = %q, readiness = %v", client.botUserID, client.Ready())
 	}
+}
+
+func waitForSlack(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition not met")
 }
 
 func TestRunReturnsAuthenticationAndSocketErrors(t *testing.T) {

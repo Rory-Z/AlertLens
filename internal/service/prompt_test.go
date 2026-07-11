@@ -60,6 +60,27 @@ func TestSanitizeAndTruncateSlack(t *testing.T) {
 	}
 }
 
+func TestBuildRequestSanitizesUntrustedInputs(t *testing.T) {
+	request, context := buildRequest(
+		Event{Text: "Authorization: Bearer slack-secret"},
+		marker.Alert{Alertname: "A", Namespace: "ns"},
+		[]alertmanager.Alert{{
+			Labels:       map[string]string{"alertname": "A", "namespace": "ns", "token": "token=label-secret"},
+			Annotations:  map[string]string{"runbook": "password: runbook-secret"},
+			GeneratorURL: "https://prom.example/?api_key=url-secret",
+		}},
+		Config{AlertPayloadMaxBytes: 32768, RunbookMaxBytes: 8192, ConversationMaxBytes: 16384},
+	)
+	for _, secret := range []string{"slack-secret", "label-secret", "runbook-secret", "url-secret"} {
+		if strings.Contains(request.Ask, secret) || strings.Contains(string(context), secret) {
+			t.Fatalf("secret %q reached request or state context: ask=%q context=%q", secret, request.Ask, context)
+		}
+	}
+	if !json.Valid(context) {
+		t.Fatalf("sanitized alert context is invalid JSON: %q", context)
+	}
+}
+
 func TestTruncateBytesKeepsUTF8Valid(t *testing.T) {
 	if got := truncateBytes("A你好", 4); got != "A你" {
 		t.Fatalf("truncateBytes() = %q", got)

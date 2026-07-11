@@ -30,7 +30,7 @@ func conversationHistory(turns []session.ConversationTurn) []holmes.Message {
 	history := make([]holmes.Message, 1, len(turns)+1)
 	history[0] = holmes.Message{Role: "system", Content: investigationSystemPrompt}
 	for _, turn := range turns {
-		history = append(history, holmes.Message{Role: turn.Role, Content: turn.Content})
+		history = append(history, holmes.Message{Role: turn.Role, Content: sanitize(turn.Content)})
 	}
 	return history
 }

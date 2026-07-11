@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"hash/fnv"
+	"sort"
 	"sync"
 	"time"
 
@@ -74,16 +75,32 @@ func New(store *session.Store, alertmanager Alertmanager, holmes Holmes, slack S
 	if metrics == nil {
 		metrics = observability.New()
 	}
-	return &Service{
+	service := &Service{
 		store: store, alertmanager: alertmanager, holmes: holmes, slack: slack,
 		config: config, now: now, queue: make(chan work, config.QueueSize),
 		metrics: metrics,
 	}
+	if store != nil {
+		if err := store.Update(func(snapshot *session.Snapshot) error {
+			for key, record := range snapshot.Sessions {
+				record.AlertContext = sanitizeJSON(record.AlertContext)
+				for index := range record.Conversation {
+					record.Conversation[index].Content = sanitize(record.Conversation[index].Content)
+				}
+				snapshot.Sessions[key] = record
+			}
+			return nil
+		}); err != nil {
+			metrics.PersistenceError()
+		}
+		metrics.Sessions(len(store.Snapshot().Sessions))
+	}
+	return service
 }
 
 func (s *Service) Submit(ctx context.Context, event Event) bool {
 	identity, ok := marker.Parse(event.Text)
-	if !ok && !event.Mention {
+	if !event.Mention && !ok {
 		s.metrics.Event("ignored")
 		return false
 	}
@@ -110,7 +127,7 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 	}
 	s.addReaction(ctx, "eyes", event.Channel, event.TS)
 	select {
-	case s.queue <- work{event: event, identity: identity, mention: !ok && event.Mention}:
+	case s.queue <- work{event: event, identity: identity, mention: event.Mention}:
 		s.metrics.Event("accepted")
 		s.metrics.QueueDepth(len(s.queue))
 		return true
@@ -162,9 +179,8 @@ func (s *Service) handle(ctx context.Context, item work) {
 		s.handleMention(ctx, item.event)
 		return
 	}
-	lock := &s.sessionLocks[sessionShard(item.identity.Key())]
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := s.lockAlertSession(item.identity.Key(), item.event)
+	defer unlock()
 
 	started := time.Now()
 	alerts, err := s.alertmanager.Active(ctx, item.identity.Alertname, item.identity.Namespace)
@@ -258,14 +274,9 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 	if parentTS == "" {
 		parentTS = event.TS
 	}
+	unlock := s.lockThread(event.Channel, parentTS)
+	defer unlock()
 	key, record, exists := findThreadSession(s.store.Snapshot(), event.Channel, parentTS)
-	if !exists {
-		key = "slack:" + event.Channel + ":" + parentTS
-	}
-	lock := &s.sessionLocks[sessionShard(key)]
-	lock.Lock()
-	defer lock.Unlock()
-	key, record, exists = findThreadSession(s.store.Snapshot(), event.Channel, parentTS)
 	if !exists {
 		key = "slack:" + event.Channel + ":" + parentTS
 		record = session.Record{
@@ -273,15 +284,18 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 			ParentTS: parentTS, ThreadTS: parentTS, CreatedAt: s.now(),
 		}
 	}
+	for index := range record.Conversation {
+		record.Conversation[index].Content = sanitize(record.Conversation[index].Content)
+	}
 	prior := append([]session.ConversationTurn(nil), record.Conversation...)
+	question := sanitize(event.Text)
+	record.AlertContext = sanitizeJSON(record.AlertContext)
 	record.Conversation = boundConversation(append(record.Conversation,
-		session.ConversationTurn{Role: "user", Content: event.Text}),
+		session.ConversationTurn{Role: "user", Content: question}),
 		s.config.ConversationMaxTurns, s.config.ConversationMaxBytes)
 	record.UpdatedAt = s.now()
 	if record.Type == "adhoc" {
 		record.ExpiresAt = record.UpdatedAt.Add(s.config.AdhocSessionTTL)
-	} else {
-		record.ExpiresAt = record.UpdatedAt.Add(s.config.AlertSessionTTL)
 	}
 	if err := s.store.Update(func(snapshot *session.Snapshot) error {
 		snapshot.Sessions[key] = record
@@ -292,7 +306,8 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 		s.transition(ctx, event, "eyes", "x")
 		return
 	}
-	ask := "<untrusted_user_question>\n" + truncateBytes(event.Text, s.config.ConversationMaxBytes) + "\n</untrusted_user_question>"
+	s.metrics.Sessions(len(s.store.Snapshot().Sessions))
+	ask := "<untrusted_user_question>\n" + truncateBytes(question, s.config.ConversationMaxBytes) + "\n</untrusted_user_question>"
 	requestSource := "freeform"
 	if record.Type == "alert" {
 		requestSource = "alert_followup"
@@ -321,8 +336,13 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 		s.transition(ctx, event, "hourglass_flowing_sand", "x")
 		return
 	}
+	retained := true
 	if err := s.store.Update(func(snapshot *session.Snapshot) error {
-		record := snapshot.Sessions[key]
+		record, exists := snapshot.Sessions[key]
+		if !exists {
+			retained = false
+			return nil
+		}
 		record.Conversation = boundConversation(append(record.Conversation,
 			session.ConversationTurn{Role: "assistant", Content: answer}),
 			s.config.ConversationMaxTurns, s.config.ConversationMaxBytes)
@@ -334,6 +354,9 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 		s.metrics.Event("failed")
 		s.transition(ctx, event, "hourglass_flowing_sand", "x")
 		return
+	}
+	if !retained {
+		s.metrics.Sessions(len(s.store.Snapshot().Sessions))
 	}
 	s.metrics.Event(requestSource)
 	s.transition(ctx, event, "hourglass_flowing_sand", "white_check_mark")
@@ -352,6 +375,76 @@ func sessionShard(key string) uint32 {
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(key))
 	return hash.Sum32() % 64
+}
+
+func (s *Service) lockAlertSession(identityKey string, event Event) func() {
+	newParentTS := event.ThreadTS
+	if newParentTS == "" {
+		newParentTS = event.TS
+	}
+	for {
+		record, exists := s.store.Snapshot().Sessions[identityKey]
+		keys := []string{identityKey, threadLockKey(event.Channel, newParentTS)}
+		if exists {
+			keys = append(keys, threadLockKey(record.Channel, sessionParent(record, newParentTS)))
+		}
+		unlock, shards := s.lockShards(keys...)
+		if current, exists := s.store.Snapshot().Sessions[identityKey]; exists {
+			currentShard := sessionShard(threadLockKey(current.Channel, sessionParent(current, newParentTS)))
+			if !containsShard(shards, currentShard) {
+				unlock()
+				continue
+			}
+		}
+		return unlock
+	}
+}
+
+func (s *Service) lockThread(channel, parentTS string) func() {
+	unlock, _ := s.lockShards(threadLockKey(channel, parentTS))
+	return unlock
+}
+
+func (s *Service) lockShards(keys ...string) (func(), []uint32) {
+	shards := make([]uint32, 0, len(keys))
+	for _, key := range keys {
+		shard := sessionShard(key)
+		if !containsShard(shards, shard) {
+			shards = append(shards, shard)
+		}
+	}
+	sort.Slice(shards, func(left, right int) bool { return shards[left] < shards[right] })
+	for _, shard := range shards {
+		s.sessionLocks[shard].Lock()
+	}
+	return func() {
+		for index := len(shards) - 1; index >= 0; index-- {
+			s.sessionLocks[shards[index]].Unlock()
+		}
+	}, shards
+}
+
+func containsShard(shards []uint32, want uint32) bool {
+	for _, shard := range shards {
+		if shard == want {
+			return true
+		}
+	}
+	return false
+}
+
+func threadLockKey(channel, parentTS string) string {
+	return "slack:" + channel + ":" + parentTS
+}
+
+func sessionParent(record session.Record, fallback string) string {
+	if record.ThreadTS != "" {
+		return record.ThreadTS
+	}
+	if record.ParentTS != "" {
+		return record.ParentTS
+	}
+	return fallback
 }
 
 func (s *Service) resolve(ctx context.Context, item work) {
