@@ -36,7 +36,7 @@
 - Produces: `marker.Alert.Key() string`, returning `am:<alertname>:<namespace>`.
 - Consumed by the service before it accepts work or adds a reaction.
 
-- [ ] **Step 1: Write failing boundary tests**
+- [x] **Step 1: Write failing boundary tests**
 
 Create table tests covering the new marker, legacy marker with either status, HTML-escaped Slack text, whitespace/newlines, empty namespace, malformed key/value pairs, missing namespace, empty alert name, and unrelated text:
 
@@ -72,17 +72,17 @@ func TestAlertKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the parser tests and verify RED**
+- [x] **Step 2: Run the parser tests and verify RED**
 
 Run: `go test ./internal/marker`
 
 Expected: FAIL because `Alert` and `Parse` do not exist.
 
-- [ ] **Step 3: Implement the smallest parser**
+- [x] **Step 3: Implement the smallest parser**
 
 Use `html.UnescapeString`, one compiled regexp for `alertlens|vigil`, and comma-separated first-`=` key/value parsing. Require both `alertname` and `namespace` keys, trim their values, and reject an empty alert name. Do not parse status or add source/provider abstractions.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `gofmt -w internal/marker && go test ./internal/marker && go test ./...`
 
