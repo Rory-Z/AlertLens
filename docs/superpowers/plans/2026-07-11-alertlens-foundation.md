@@ -46,7 +46,7 @@
 - Produces: `health.New(readiness func() error) http.Handler`
 - Later tasks consume `config.Config.StatePath` and supply the state-store readiness function.
 
-- [ ] **Step 1: Initialize the Go module**
+- [x] **Step 1: Initialize the Go module**
 
 ```go
 module github.com/emqx/alertlens
@@ -54,7 +54,7 @@ module github.com/emqx/alertlens
 go 1.22
 ```
 
-- [ ] **Step 2: Write failing table tests for required configuration and defaults**
+- [x] **Step 2: Write failing table tests for required configuration and defaults**
 
 Create `internal/config/config_test.go` with a helper backed by a map and cases that assert:
 
@@ -118,13 +118,13 @@ func mapEnv(values map[string]string) func(string) string {
 }
 ```
 
-- [ ] **Step 3: Run the configuration test and verify it fails**
+- [x] **Step 3: Run the configuration test and verify it fails**
 
 Run: `go test ./internal/config`
 
 Expected: FAIL because `Load` and `Config` do not exist.
 
-- [ ] **Step 4: Implement configuration parsing with the standard library**
+- [x] **Step 4: Implement configuration parsing with the standard library**
 
 Create `internal/config/config.go`. Define one concrete `Config` struct containing all configuration names and defaults from the approved design. Implement `Load` with small private helpers for required strings, HTTP(S) base URLs, positive integers, positive durations, and comma-separated channel IDs.
 
@@ -160,13 +160,13 @@ func Load(getenv func(string) string) (Config, error)
 
 Reject empty required values, URLs without `http` or `https`, non-positive durations and limits, and an empty channel list. Wrap errors with the environment-variable name; never include secret values in errors.
 
-- [ ] **Step 5: Run configuration tests**
+- [x] **Step 5: Run configuration tests**
 
 Run: `go test ./internal/config`
 
 Expected: PASS.
 
-- [ ] **Step 6: Write failing handler tests for liveness and readiness**
+- [x] **Step 6: Write failing handler tests for liveness and readiness**
 
 Create `internal/health/handler_test.go`:
 
@@ -193,13 +193,13 @@ func TestHandler(t *testing.T) {
 }
 ```
 
-- [ ] **Step 7: Run the handler test and verify it fails**
+- [x] **Step 7: Run the handler test and verify it fails**
 
 Run: `go test ./internal/health`
 
 Expected: FAIL because `New` does not exist.
 
-- [ ] **Step 8: Implement the health handler and process startup**
+- [x] **Step 8: Implement the health handler and process startup**
 
 Create `internal/health/handler.go` using `http.NewServeMux`. `/healthz` always returns status 200 and body `ok\n`. `/readyz` returns 200 only when the supplied function returns nil; otherwise it returns 503 and the generic body `not ready\n` without exposing the underlying error.
 
@@ -216,7 +216,7 @@ func main() {
 
 `run` loads config, starts an `http.Server` on `cfg.MetricsAddr`, handles `SIGINT` and `SIGTERM` with `signal.NotifyContext`, and shuts down with a five-second context. For this task, readiness returns nil after configuration succeeds. Do not log the `Config` struct because it contains Slack tokens.
 
-- [ ] **Step 9: Run and build the service**
+- [x] **Step 9: Run and build the service**
 
 Create `cmd/alertlens/main_test.go` with a valid map-backed environment, `METRICS_ADDR=127.0.0.1:0`, and a `STATE_PATH` under `t.TempDir()`. Cover both startup validation and graceful cancellation:
 
@@ -244,7 +244,7 @@ Run: `gofmt -w cmd internal && go test ./... && go build ./cmd/alertlens`
 
 Expected: all packages PASS and the binary builds.
 
-- [ ] **Step 10: Commit the runnable foundation**
+- [x] **Step 10: Commit the runnable foundation**
 
 ```bash
 git add go.mod cmd/alertlens internal/config internal/health
