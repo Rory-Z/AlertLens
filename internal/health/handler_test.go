@@ -9,7 +9,9 @@ import (
 
 func TestHandler(t *testing.T) {
 	var readyErr error
-	h := New(func() error { return readyErr })
+	h := New(func() error { return readyErr }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("metric 1\n"))
+	}))
 
 	assertResponse := func(path string, wantStatus int, wantBody string) {
 		t.Helper()
@@ -26,4 +28,5 @@ func TestHandler(t *testing.T) {
 	readyErr = errors.New("sensitive state path")
 	assertResponse("/readyz", http.StatusServiceUnavailable, "not ready\n")
 	assertResponse("/unknown", http.StatusNotFound, "404 page not found\n")
+	assertResponse("/metrics", http.StatusOK, "metric 1\n")
 }

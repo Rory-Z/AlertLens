@@ -76,7 +76,7 @@ func TestServeRunsUntilCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- serve(ctx, listener, func() error { return nil }, &fakeSlackRunner{}, fakeWorker{})
+		done <- serve(ctx, listener, func() error { return nil }, http.NotFoundHandler(), &fakeSlackRunner{}, fakeWorker{})
 	}()
 	waitHTTPStatus(t, "http://"+listener.Addr().String()+"/readyz", http.StatusOK)
 	cancel()
@@ -91,7 +91,7 @@ func TestServeReturnsSlackError(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := errors.New("Slack failed")
-	err = serve(context.Background(), listener, func() error { return nil }, &fakeSlackRunner{runErr: want}, fakeWorker{})
+	err = serve(context.Background(), listener, func() error { return nil }, http.NotFoundHandler(), &fakeSlackRunner{runErr: want}, fakeWorker{})
 	if !errors.Is(err, want) {
 		t.Fatalf("serve() = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestServeRejectsUnexpectedSlackStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = serve(context.Background(), listener, func() error { return nil }, &fakeSlackRunner{returnImmediately: true}, fakeWorker{})
+	err = serve(context.Background(), listener, func() error { return nil }, http.NotFoundHandler(), &fakeSlackRunner{returnImmediately: true}, fakeWorker{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -116,7 +116,7 @@ func TestServeReturnsHTTPError(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := serve(context.Background(), listener, func() error { return nil }, &fakeSlackRunner{}, fakeWorker{}); err == nil {
+	if err := serve(context.Background(), listener, func() error { return nil }, http.NotFoundHandler(), &fakeSlackRunner{}, fakeWorker{}); err == nil {
 		t.Fatal("expected error")
 	}
 }

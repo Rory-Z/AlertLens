@@ -16,6 +16,7 @@ import (
 	"github.com/emqx/alertlens/internal/config"
 	"github.com/emqx/alertlens/internal/health"
 	"github.com/emqx/alertlens/internal/holmes"
+	"github.com/emqx/alertlens/internal/observability"
 	"github.com/emqx/alertlens/internal/service"
 	"github.com/emqx/alertlens/internal/session"
 	slackadapter "github.com/emqx/alertlens/internal/slack"
@@ -39,6 +40,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return fmt.Errorf("open state: %w", err)
 	}
+	metrics := observability.New()
+	metrics.Sessions(len(store.Snapshot().Sessions))
 	slackClient := slackadapter.New(cfg.SlackBotToken, cfg.SlackAppToken, cfg.AlertChannels)
 	worker := service.New(
 		store,
@@ -54,6 +57,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			SlackOutputMaxChars: cfg.SlackOutputMaxChars,
 		},
 		time.Now,
+		metrics,
 	)
 
 	listener, err := net.Listen("tcp", cfg.MetricsAddr)
@@ -63,7 +67,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if ctx.Err() != nil {
 		return listener.Close()
 	}
-	return serve(ctx, listener, store.Ready, slackClient, worker)
+	return serve(ctx, listener, store.Ready, metrics.Handler(), slackClient, worker)
 }
 
 type slackRunner interface {
@@ -76,13 +80,13 @@ type workerRunner interface {
 	Run(context.Context)
 }
 
-func serve(ctx context.Context, listener net.Listener, storeReady func() error, slackClient slackRunner, worker workerRunner) error {
+func serve(ctx context.Context, listener net.Listener, storeReady func() error, metricsHandler http.Handler, slackClient slackRunner, worker workerRunner) error {
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	srv := &http.Server{
 		Handler: health.New(func() error {
 			return ready(storeReady, slackClient.Ready)
-		}),
+		}, metricsHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serverErr := make(chan error, 1)

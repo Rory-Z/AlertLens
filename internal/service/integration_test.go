@@ -18,6 +18,7 @@ import (
 
 	"github.com/emqx/alertlens/internal/alertmanager"
 	"github.com/emqx/alertlens/internal/holmes"
+	"github.com/emqx/alertlens/internal/observability"
 	"github.com/emqx/alertlens/internal/session"
 )
 
@@ -75,6 +76,7 @@ func TestFiringAlert(t *testing.T) {
 			SlackOutputMaxChars:  2500,
 		},
 		func() time.Time { return now },
+		nil,
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -192,7 +194,7 @@ func TestEventIDDedupSurvivesRestart(t *testing.T) {
 	firstSlack := &fakeSlack{}
 	first := New(store, nil, nil, firstSlack, Config{
 		QueueSize: 1, Workers: 1, EventDedupTTL: 10 * time.Minute,
-	}, func() time.Time { return now })
+	}, func() time.Time { return now }, nil)
 	event := Event{ID: "Ev1", Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace= -->`, TS: "1"}
 	if !first.Submit(context.Background(), event) {
 		t.Fatal("first event rejected")
@@ -205,7 +207,7 @@ func TestEventIDDedupSurvivesRestart(t *testing.T) {
 	secondSlack := &fakeSlack{}
 	second := New(reopened, nil, nil, secondSlack, Config{
 		QueueSize: 1, Workers: 1, EventDedupTTL: 10 * time.Minute,
-	}, func() time.Time { return now })
+	}, func() time.Time { return now }, nil)
 	if second.Submit(context.Background(), event) {
 		t.Fatal("replayed event accepted after restart")
 	}
@@ -218,7 +220,7 @@ func TestEventIDDedupSurvivesRestart(t *testing.T) {
 	}
 	third := New(expired, nil, nil, &fakeSlack{}, Config{
 		QueueSize: 1, Workers: 1, EventDedupTTL: 10 * time.Minute,
-	}, func() time.Time { return now.Add(11 * time.Minute) })
+	}, func() time.Time { return now.Add(11 * time.Minute) }, nil)
 	if !third.Submit(context.Background(), event) {
 		t.Fatal("expired event ID was not accepted")
 	}
@@ -264,7 +266,7 @@ func TestSameSessionIsOrderedWhileDifferentSessionContinues(t *testing.T) {
 			AlertSessionTTL: 24 * time.Hour, ResolvedSessionTTL: 24 * time.Hour,
 			AlertPayloadMaxBytes: 32768, RunbookMaxBytes: 8192,
 			ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
-		}, time.Now,
+		}, time.Now, nil,
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -351,9 +353,45 @@ func TestWatchdogSkipsHolmesAndReply(t *testing.T) {
 	}
 }
 
+func TestWatchdogRecordsLifecycleMetrics(t *testing.T) {
+	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics := observability.New()
+	slack := &fakeSlack{}
+	service := New(store, activeAlertmanager("Watchdog", ""),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			t.Fatal("Holmes must not be called")
+			return "", nil
+		}), slack,
+		Config{QueueSize: 2, Workers: 1, EventDedupTTL: 10 * time.Minute},
+		func() time.Time { return now }, metrics,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	service.Submit(ctx, Event{ID: "EvWatchdog", Channel: "C1", Text: `<!-- alertlens:alertname=Watchdog,namespace= -->`, TS: "1"})
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:1") })
+	w := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{
+		`alertlens_events_total{outcome="accepted"} 1`,
+		`alertlens_events_total{outcome="watchdog"} 1`,
+		`alertlens_watchdog_last_seen_timestamp 1.783728e+09`,
+		`alertlens_watchdog_received_total 1`,
+	} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("metrics missing %q:\n%s", want, w.Body.String())
+		}
+	}
+}
+
 func TestQueueSaturationRejectsWithFailureReaction(t *testing.T) {
 	slack := &fakeSlack{}
-	service := New(nil, nil, nil, slack, Config{QueueSize: 1, Workers: 1}, time.Now)
+	service := New(nil, nil, nil, slack, Config{QueueSize: 1, Workers: 1}, time.Now, nil)
 	event := Event{Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace= -->`, TS: "1"}
 	if !service.Submit(context.Background(), event) {
 		t.Fatal("first event rejected")
@@ -369,7 +407,7 @@ func TestQueueSaturationRejectsWithFailureReaction(t *testing.T) {
 
 func TestSubmitIgnoresUnmarkedMessage(t *testing.T) {
 	slack := &fakeSlack{}
-	service := New(nil, nil, nil, slack, Config{QueueSize: 1, Workers: 1}, time.Now)
+	service := New(nil, nil, nil, slack, Config{QueueSize: 1, Workers: 1}, time.Now, nil)
 	if service.Submit(context.Background(), Event{Channel: "C1", Text: "hello", TS: "1"}) {
 		t.Fatal("unmarked event accepted")
 	}
@@ -538,7 +576,7 @@ func startBehaviorService(t *testing.T, am Alertmanager, h Holmes, slack *fakeSl
 		AlertSessionTTL: 24 * time.Hour, ResolvedSessionTTL: 24 * time.Hour,
 		AlertPayloadMaxBytes: 32768, RunbookMaxBytes: 8192,
 		ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
-	}, func() time.Time { return now })
+	}, func() time.Time { return now }, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

@@ -142,7 +142,7 @@ git commit -m "feat(service): deduplicate and order alert events"
 - Produces `(*Metrics).Handler() http.Handler` and concrete recording methods used by the service.
 - Changes `health.New(readiness, metricsHandler)` to expose `/healthz`, `/readyz`, and `/metrics` from one mux.
 
-- [ ] **Step 1: Add Prometheus client and failing registry tests**
+- [x] **Step 1: Add Prometheus client and failing registry tests**
 
 Run: `go get github.com/prometheus/client_golang@v1.23.2`.
 
@@ -163,15 +163,15 @@ alertlens_watchdog_received_total
 
 Also expose Alertmanager/Holmes duration histograms without dynamic labels. Assert gathered label names never contain `alertname`, `namespace`, `channel`, `thread`, `event`, or `url`.
 
-- [ ] **Step 2: Implement concrete metrics and service recording**
+- [x] **Step 2: Implement concrete metrics and service recording**
 
 Use `prometheus.NewRegistry`, standard collectors, `CounterVec` only for the bounded labels above, and `promhttp.HandlerFor`. Record accepted/duplicate/dropped/stale/firing/resolved/watchdog/failed outcomes, reaction success/failure, client outcomes/durations, active Holmes calls, queue depth, session count, and persistence failures. Watchdog sets Unix seconds and increments its counter.
 
-- [ ] **Step 3: Add `/metrics` handler tests and wire startup**
+- [x] **Step 3: Add `/metrics` handler tests and wire startup**
 
 Test the handler returns Prometheus text and readiness remains generic. Main creates one `Metrics`, passes it to the service, and exposes its handler. Update Helm probes/service only if rendering changes are required; the existing port 9090 remains.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `go mod tidy && gofmt -w cmd internal && go test -race -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1`
 

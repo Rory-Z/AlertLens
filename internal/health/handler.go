@@ -2,7 +2,7 @@ package health
 
 import "net/http"
 
-func New(readiness func() error) http.Handler {
+func New(readiness func() error, metrics http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
@@ -14,5 +14,6 @@ func New(readiness func() error) http.Handler {
 		}
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	mux.Handle("GET /metrics", metrics)
 	return mux
 }
