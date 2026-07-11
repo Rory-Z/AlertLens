@@ -9,8 +9,8 @@ import (
 var markerPattern = regexp.MustCompile(`(?s)<!--\s*(?:alertlens|vigil)\s*:(.*?)-->`)
 
 type Alert struct {
-	Alertname string
-	Namespace string
+	Alertname string `json:"alertname"`
+	Namespace string `json:"namespace"`
 }
 
 func (a Alert) Key() string {

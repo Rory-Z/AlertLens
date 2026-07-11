@@ -202,10 +202,10 @@ git commit -m "feat(api): add Alertmanager and Holmes clients"
 - Produces: `service.Event{ID, Channel, User, BotID, Text, TS, ThreadTS string}`.
 - Produces: `service.Alertmanager` with `Active(context.Context, string, string) ([]alertmanager.Alert, error)` and `service.Holmes` with `Chat(context.Context, holmes.Request) (string, error)`; the HTTP clients satisfy them directly.
 - Produces: `service.Slack` with `AddReaction(context.Context, string, string, string) error`, `RemoveReaction(context.Context, string, string, string) error`, and `Reply(context.Context, string, string, string) error`; the fake test implementation is the second implementation.
-- Produces: `service.Config` with integer fields `QueueSize`, `Workers`, `AlertPayloadMaxBytes`, `RunbookMaxBytes`, `SlackOutputMaxChars`, plus `AlertSessionTTL time.Duration`, rather than exposing the full secret-bearing application config.
+- Produces: `service.Config` with integer fields `QueueSize`, `Workers`, `AlertPayloadMaxBytes`, `RunbookMaxBytes`, `ConversationMaxBytes`, `SlackOutputMaxChars`, plus `AlertSessionTTL time.Duration`, rather than exposing the full secret-bearing application config.
 - Produces: `service.New(store, alertmanager, holmes, slack, config, now) *Service`, `(*Service).Submit(context.Context, Event) bool`, and `(*Service).Run(context.Context)`.
 
-- [ ] **Step 1: Write one end-to-end in-process firing test**
+- [x] **Step 1: Write one end-to-end in-process firing test**
 
 Assemble the real marker parser, service, HTTP clients, session store, two `httptest.Server` instances, and a fake Slack transport. Submit a marked Slack event and assert:
 
@@ -221,13 +221,13 @@ wantReactions := []string{
 
 The Holmes handler must read the on-disk snapshot before responding and find an active `am:HighCPU:prod` session, proving persistence precedes the side effect. Assert its request contains all matching alerts, one deduplicated inline runbook, delimited original Slack text, `request_source=alert_investigation`, `source_ref=am:HighCPU:prod`, and a stable conversation ID. Assert the fake Slack reply targets thread `100.1` and is bounded.
 
-- [ ] **Step 2: Run the integration test and verify RED**
+- [x] **Step 2: Run the integration test and verify RED**
 
 Run: `go test ./internal/service -run TestFiringAlert -v`
 
 Expected: FAIL because the service does not exist.
 
-- [ ] **Step 3: Implement minimal queue and firing flow**
+- [x] **Step 3: Implement minimal queue and firing flow**
 
 `Submit` parses before acceptance, adds `eyes`, and performs a non-blocking send to a channel sized by `EVENT_QUEUE_SIZE`. On a full queue it removes `eyes`, adds `x`, and returns false. `Run` starts exactly `HOLMESGPT_MAX_CONCURRENCY` workers and stops on context cancellation.
 
@@ -245,7 +245,7 @@ For a normal firing work item:
 
 Reaction calls are best-effort and never contain message text in errors or logs. A Watchdog marker queries Alertmanager, records no Holmes call or reply, and transitions directly from `eyes` to `white_check_mark`; its metrics are milestone 3.
 
-- [ ] **Step 4: Add integration cases for duplicate and failures**
+- [x] **Step 4: Add integration cases for duplicate and failures**
 
 Use the same assembled system to cover:
 
@@ -256,11 +256,11 @@ Use the same assembled system to cover:
 - Watchdog: no Holmes call or reply;
 - reaction failure: RCA and reply still succeed.
 
-- [ ] **Step 5: Add focused prompt boundary tests**
+- [x] **Step 5: Add focused prompt boundary tests**
 
 Test complete-alert JSON bounding, runbook deduplication and byte limits, untrusted delimiters, UTF-8 Slack truncation, and sanitizer replacement. Never slice arbitrary JSON bytes; retain as many complete alerts as fit and re-marshal.
 
-- [ ] **Step 6: Verify race, coverage, and commit**
+- [x] **Step 6: Verify race, coverage, and commit**
 
 Run:
 
