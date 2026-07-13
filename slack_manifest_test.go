@@ -43,10 +43,10 @@ type slackManifest struct {
 func TestSlackManifestEnvironments(t *testing.T) {
 	wantNames := map[string]string{"dev": "AlertLens Dev", "prod": "AlertLens"}
 	wantScopes := []string{
-		"app_mentions:read", "channels:history", "chat:write",
+		"app_mentions:read", "channels:history", "groups:history", "chat:write",
 		"reactions:read", "reactions:write",
 	}
-	wantEvents := []string{"app_mention", "message.channels"}
+	wantEvents := []string{"app_mention", "message.channels", "message.groups"}
 	var normalized *slackManifest
 
 	for environment, wantName := range wantNames {
