@@ -31,8 +31,8 @@ Import the chosen file in Slack to create the app. Generate a separate app-level
 
 Use a dedicated Slack App while AlertLens and Vigil run in parallel. The manifest configures Socket Mode plus:
 
-- bot scopes: `app_mentions:read`, `channels:history`, `chat:write`, `reactions:read`, `reactions:write`
-- event subscriptions: `message.channels` and `app_mention`
+- bot scopes: `app_mentions:read`, `channels:history`, `groups:history`, `chat:write`, `reactions:read`, `reactions:write`
+- event subscriptions: `message.channels`, `message.groups`, and `app_mention`
 
 The app-level `connections:write` scope is not part of the manifest; add it when generating the separate app-level token described above.
 
@@ -44,7 +44,7 @@ Go 1.25 or newer is required. The service reads configuration from the environme
 
 - `SLACK_BOT_TOKEN`
 - `SLACK_APP_TOKEN`
-- `SLACK_ALERT_CHANNELS`
+- `SLACK_ALERT_CHANNELS` (comma-separated public or private channel IDs)
 - `ALERTMANAGER_URL`
 - `HOLMESGPT_URL`
 

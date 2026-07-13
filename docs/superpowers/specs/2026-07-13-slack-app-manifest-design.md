@@ -21,9 +21,9 @@ configuration.
 
 Both rendered manifests enable Socket Mode and define the same:
 
-- bot scopes: `app_mentions:read`, `channels:history`, `chat:write`,
+- bot scopes: `app_mentions:read`, `channels:history`, `groups:history`, `chat:write`,
   `reactions:read`, and `reactions:write`;
-- bot events: `app_mention` and `message.channels`;
+- bot events: `app_mention`, `message.channels`, and `message.groups`;
 - non-org deployment, non-hosted operation, and disabled token rotation.
 
 No HTTP request URL, interactivity, slash command, user scope, or distribution
@@ -41,4 +41,3 @@ Repository tests render both environments, parse the YAML, assert the expected
 display names, and assert that the normalized documents differ only in those
 two name fields. The renderer also has rejection coverage for missing or
 unknown environments. Existing CI runs these tests through `go test ./...`.
-
