@@ -84,7 +84,7 @@ func TestSlackManifestEnvironments(t *testing.T) {
 }
 
 func TestSlackManifestRejectsUnknownEnvironment(t *testing.T) {
-	for _, arguments := range [][]string{nil, {"staging"}} {
+	for _, arguments := range [][]string{nil, {"staging"}, {"dev", "ignored"}} {
 		var stdout bytes.Buffer
 		command := exec.Command("./scripts/render-slack-manifest", arguments...)
 		command.Stdout = &stdout

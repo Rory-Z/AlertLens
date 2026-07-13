@@ -1,7 +1,12 @@
 #!/bin/sh
 set -eu
 
-case "${1:-}" in
+if [ "$#" -ne 1 ]; then
+  echo 'usage: scripts/render-slack-manifest dev|prod' >&2
+  exit 2
+fi
+
+case "$1" in
   dev) app_name='AlertLens Dev' ;;
   prod) app_name='AlertLens' ;;
   *)

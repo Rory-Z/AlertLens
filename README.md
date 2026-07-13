@@ -29,11 +29,12 @@ Render the canonical Slack App Manifest for the target environment:
 
 Import the chosen file in Slack to create the app. Generate a separate app-level token with `connections:write`, then install the app to the workspace to obtain its `xoxb` bot token and invite the app to the monitored channel. Store the tokens in the existing Kubernetes Secret as `app-token` and `bot-token`, respectively.
 
-Use a dedicated Slack App while AlertLens and Vigil run in parallel. The manifest configures:
+Use a dedicated Slack App while AlertLens and Vigil run in parallel. The manifest configures Socket Mode plus:
 
-- app token scope: `connections:write`
 - bot scopes: `app_mentions:read`, `channels:history`, `chat:write`, `reactions:read`, `reactions:write`
 - event subscriptions: `message.channels` and `app_mention`
+
+The app-level `connections:write` scope is not part of the manifest; add it when generating the separate app-level token described above.
 
 Do not share Vigil's app token: simultaneous Socket Mode clients compete for envelopes.
 
