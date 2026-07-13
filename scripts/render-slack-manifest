@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+  dev) app_name='AlertLens Dev' ;;
+  prod) app_name='AlertLens' ;;
+  *)
+    echo 'usage: scripts/render-slack-manifest dev|prod' >&2
+    exit 2
+    ;;
+esac
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+sed "s/__ALERTLENS_APP_NAME__/$app_name/g" "$repo_root/deploy/slack/app-manifest.yaml"

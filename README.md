@@ -20,7 +20,16 @@ Current alert behavior:
 
 ## Slack app
 
-Use a dedicated Slack App while AlertLens and Vigil run in parallel. Enable Socket Mode and configure:
+Render the canonical Slack App Manifest for the target environment:
+
+```bash
+./scripts/render-slack-manifest dev  > /tmp/alertlens-dev.yaml
+./scripts/render-slack-manifest prod > /tmp/alertlens-prod.yaml
+```
+
+Import the chosen file in Slack to create the app. Generate a separate app-level token with `connections:write`, then install the app to the workspace to obtain its `xoxb` bot token and invite the app to the monitored channel. Store the tokens in the existing Kubernetes Secret as `app-token` and `bot-token`, respectively.
+
+Use a dedicated Slack App while AlertLens and Vigil run in parallel. The manifest configures:
 
 - app token scope: `connections:write`
 - bot scopes: `app_mentions:read`, `channels:history`, `chat:write`, `reactions:read`, `reactions:write`

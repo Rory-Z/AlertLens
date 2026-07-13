@@ -33,7 +33,7 @@
 - Consumes: one command argument, exactly `dev` or `prod`.
 - Produces: an importable Slack App Manifest YAML document on stdout.
 
-- [ ] **Step 1: Write the failing renderer contract test**
+- [x] **Step 1: Write the failing renderer contract test**
 
 Create `slack_manifest_test.go`:
 
@@ -146,7 +146,7 @@ wantScopes := []string{
 wantEvents := []string{"app_mention", "message.channels"}
 ```
 
-- [ ] **Step 2: Run the contract test and verify it fails**
+- [x] **Step 2: Run the contract test and verify it fails**
 
 Run:
 
@@ -156,7 +156,7 @@ go test . -run TestSlackManifest -v
 
 Expected: FAIL because `scripts/render-slack-manifest` does not exist.
 
-- [ ] **Step 3: Add the canonical manifest**
+- [x] **Step 3: Add the canonical manifest**
 
 Create `deploy/slack/app-manifest.yaml`:
 
@@ -189,7 +189,7 @@ settings:
   token_rotation_enabled: false
 ```
 
-- [ ] **Step 4: Add the fixed renderer**
+- [x] **Step 4: Add the fixed renderer**
 
 Create executable `scripts/render-slack-manifest`:
 
@@ -213,7 +213,7 @@ sed "s/__ALERTLENS_APP_NAME__/$app_name/g" "$repo_root/deploy/slack/app-manifest
 Set mode `0755`. Run `go mod tidy` so the already-present
 `go.yaml.in/yaml/v2` dependency is recorded as direct test usage.
 
-- [ ] **Step 5: Run the contract and full tests**
+- [x] **Step 5: Run the contract and full tests**
 
 Run:
 
@@ -224,7 +224,7 @@ go test -race -coverprofile=coverage.out ./...
 
 Expected: all tests PASS and total statement coverage remains at least 90%.
 
-- [ ] **Step 6: Document creation and manual token steps**
+- [x] **Step 6: Document creation and manual token steps**
 
 Update `README.md` under `Slack app` with:
 
@@ -238,7 +238,7 @@ token with `connections:write`, installing the app for the `xoxb` token,
 inviting it to the monitored channel, and storing both tokens in the existing
 Kubernetes Secret keys `app-token` and `bot-token`.
 
-- [ ] **Step 7: Run repository gates and commit**
+- [x] **Step 7: Run repository gates and commit**
 
 Run:
 

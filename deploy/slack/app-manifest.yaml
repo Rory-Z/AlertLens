@@ -1,0 +1,26 @@
+_metadata:
+  major_version: 1
+display_information:
+  name: __ALERTLENS_APP_NAME__
+  description: Alertmanager-first HolmesGPT RCA companion
+features:
+  bot_user:
+    display_name: __ALERTLENS_APP_NAME__
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - chat:write
+      - reactions:read
+      - reactions:write
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.channels
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  is_hosted: false
+  token_rotation_enabled: false
