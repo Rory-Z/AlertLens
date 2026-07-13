@@ -88,6 +88,14 @@ func sanitizeJSON(data json.RawMessage) json.RawMessage {
 	return result
 }
 
+func boundAlertContext(data json.RawMessage, maxBytes int) json.RawMessage {
+	data = sanitizeJSON(data)
+	if maxBytes > 0 && len(data) > maxBytes {
+		return json.RawMessage(`{}`)
+	}
+	return data
+}
+
 func sanitizeJSONValue(value any) any {
 	switch typed := value.(type) {
 	case string:

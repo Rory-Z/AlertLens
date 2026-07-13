@@ -17,6 +17,19 @@ type Store struct {
 	readyErr error
 }
 
+type updateError struct {
+	err       error
+	committed bool
+}
+
+func (e *updateError) Error() string { return e.err.Error() }
+func (e *updateError) Unwrap() error { return e.err }
+
+func UpdateCommitted(err error) bool {
+	var updateErr *updateError
+	return errors.As(err, &updateErr) && updateErr.committed
+}
+
 func Open(path string, now func() time.Time) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("state path is empty")
@@ -86,6 +99,7 @@ func (s *Store) update(update func(*Snapshot) error, retainOnPersistenceFailure 
 		s.snapshot = next
 	}
 	if err != nil {
+		err = &updateError{err: err, committed: committed}
 		s.readyErr = err
 		return err
 	}

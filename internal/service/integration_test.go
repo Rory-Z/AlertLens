@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -108,7 +109,7 @@ func TestFiringAlert(t *testing.T) {
 		"remove:hourglass_flowing_sand:C1:100.1",
 		"add:white_check_mark:C1:100.1",
 	}
-	if got := slack.reactionLog(); !equalStrings(got, wantReactions) {
+	if got := slack.reactionLog(); !slices.Equal(got, wantReactions) {
 		t.Fatalf("reactions = %#v, want %#v", got, wantReactions)
 	}
 	request := <-requestCh
@@ -223,6 +224,30 @@ func TestFailedEventReceiptCanRetryAfterStorageRecovers(t *testing.T) {
 	}
 }
 
+func TestCommittedEventReceiptStillQueuesOnce(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	store, err := session.Open(filepath.Join(dir, "state.json"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, nil, nil, &fakeSlack{}, Config{
+		QueueSize: 1, EventDedupTTL: time.Hour,
+	}, func() time.Time { return now }, nil)
+	restrictDirectoryReads(t, dir)
+
+	event := Event{ID: "EvCommitted", Channel: "C1", Text: "question", TS: "1", Mention: true}
+	if !service.Submit(context.Background(), event) {
+		t.Fatal("committed receipt was rejected")
+	}
+	if len(service.queue) != 1 || store.Snapshot().EventIDs[event.ID].IsZero() || store.Ready() == nil {
+		t.Fatalf("queue depth = %d, snapshot = %#v, ready error = %v", len(service.queue), store.Snapshot(), store.Ready())
+	}
+	if body := metricsBody(t, service.metrics); !strings.Contains(body, "alertlens_persistence_errors_total 1") {
+		t.Fatalf("metrics = %s", body)
+	}
+}
+
 func TestFailedFiringClaimCanRetryAfterStorageRecovers(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
@@ -266,6 +291,57 @@ func TestFailedFiringClaimCanRetryAfterStorageRecovers(t *testing.T) {
 	}
 	if err := store.Ready(); err != nil {
 		t.Fatalf("readiness did not recover: %v", err)
+	}
+}
+
+func TestCommittedFiringClaimStillCallsHolmesOnce(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	store, err := session.Open(filepath.Join(dir, "state.json"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var holmesCalls atomic.Int32
+	service := New(store, activeAlertmanager("A", "ns"),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			holmesCalls.Add(1)
+			return "answer", nil
+		}), &fakeSlack{}, Config{
+			AlertSessionTTL: time.Hour, AlertPayloadMaxBytes: 32768,
+			RunbookMaxBytes: 8192, ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, func() time.Time { return now }, nil)
+	restrictDirectoryReads(t, dir)
+
+	service.handle(context.Background(), work{
+		event:    Event{Channel: "C1", Text: `<!-- alertlens:alertname=A,namespace=ns -->`, TS: "1"},
+		identity: marker.Alert{Alertname: "A", Namespace: "ns"},
+	})
+	if holmesCalls.Load() != 1 || store.Ready() == nil {
+		t.Fatalf("Holmes calls = %d, ready error = %v", holmesCalls.Load(), store.Ready())
+	}
+}
+
+func TestCommittedInitialMentionStillCallsHolmesOnce(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	store, err := session.Open(filepath.Join(dir, "state.json"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var holmesCalls atomic.Int32
+	service := New(store, nil,
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			holmesCalls.Add(1)
+			return "answer", nil
+		}), &fakeSlack{}, Config{
+			AdhocSessionTTL: time.Hour, ConversationMaxTurns: 6,
+			ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, func() time.Time { return now }, nil)
+	restrictDirectoryReads(t, dir)
+
+	service.handleMention(context.Background(), Event{Channel: "C1", Text: "question", TS: "1", Mention: true})
+	if holmesCalls.Load() != 1 || store.Ready() == nil {
+		t.Fatalf("Holmes calls = %d, ready error = %v", holmesCalls.Load(), store.Ready())
 	}
 }
 
@@ -501,6 +577,93 @@ func TestSubmitIgnoresUnmarkedMessage(t *testing.T) {
 	}
 }
 
+func TestRunDrainsAcceptedWorkBeforeReturning(t *testing.T) {
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstStarted := make(chan struct{})
+	firstCanceled := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondCompleted := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseFirst) }) })
+	var calls atomic.Int32
+	service := New(store, nil,
+		holmesFunc(func(ctx context.Context, _ holmes.Request) (string, error) {
+			switch calls.Add(1) {
+			case 1:
+				close(firstStarted)
+				select {
+				case <-ctx.Done():
+					close(firstCanceled)
+					return "", ctx.Err()
+				case <-releaseFirst:
+				}
+			case 2:
+				close(secondCompleted)
+			}
+			return "answer", nil
+		}), &fakeSlack{}, Config{
+			QueueSize: 2, Workers: 1, AdhocSessionTTL: time.Hour,
+			ConversationMaxTurns: 6, ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, time.Now, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() { service.Run(ctx); close(runDone) }()
+	t.Cleanup(func() {
+		cancel()
+		releaseOnce.Do(func() { close(releaseFirst) })
+		<-runDone
+	})
+
+	if !service.Submit(context.Background(), Event{Channel: "C1", Text: "first", TS: "1", Mention: true}) {
+		t.Fatal("first work item was rejected")
+	}
+	<-firstStarted
+	if !service.Submit(context.Background(), Event{Channel: "C1", Text: "second", TS: "2", Mention: true}) {
+		t.Fatal("second work item was rejected")
+	}
+	cancel()
+	select {
+	case <-firstCanceled:
+		t.Fatal("shutdown canceled in-flight work before the drain ceiling")
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(releaseFirst) })
+	select {
+	case <-secondCompleted:
+	case <-runDone:
+		t.Fatal("Run returned before queued work completed")
+	case <-time.After(time.Second):
+		t.Fatal("queued work did not complete")
+	}
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after draining")
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("Holmes calls = %d", calls.Load())
+	}
+}
+
+func TestSubmitAfterRunStopsIsRejected(t *testing.T) {
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, nil, nil, &fakeSlack{}, Config{QueueSize: 1, Workers: 1}, time.Now, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	cancel()
+	<-done
+	if service.Submit(context.Background(), Event{Channel: "C1", Text: "question", TS: "1", Mention: true}) {
+		t.Fatal("submission was accepted after Run stopped")
+	}
+}
+
 func TestNoMatchingAlertRemovesReceivedReaction(t *testing.T) {
 	slack := &fakeSlack{}
 	service, _ := startBehaviorService(t,
@@ -552,7 +715,7 @@ func TestConfirmedResolutionUpdatesOriginalThread(t *testing.T) {
 		"add:large_green_circle:C1:200.1",
 		"add:large_green_circle:C1:100.1",
 	}
-	if got := slack.reactionLog(); !equalStrings(got, wantReactions) {
+	if got := slack.reactionLog(); !slices.Equal(got, wantReactions) {
 		t.Fatalf("reactions = %#v, want %#v", got, wantReactions)
 	}
 	wantReply := "C1:100.1:🟢 Alertmanager confirms this alert is resolved."
@@ -1051,6 +1214,86 @@ func TestNewSanitizesRecoveredSessionState(t *testing.T) {
 	}
 }
 
+func TestNewBoundsRecoveredSessionState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := session.Open(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "active",
+			AlertContext: json.RawMessage(`{"payload":"0123456789"}`),
+			Conversation: []session.ConversationTurn{
+				{Role: "user", Content: "1111"},
+				{Role: "assistant", Content: "2222"},
+				{Role: "user", Content: "3333"},
+			},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = New(store, nil, nil, nil, Config{
+		AlertPayloadMaxBytes: 10, ConversationMaxTurns: 2, ConversationMaxBytes: 6,
+	}, time.Now, nil)
+
+	reopened, err := session.Open(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := reopened.Snapshot().Sessions["am:A:ns"]
+	if string(record.AlertContext) != `{}` || len(record.Conversation) > 2 || conversationBytes(record.Conversation) > 6 {
+		t.Fatalf("record = %#v", record)
+	}
+}
+
+func TestMentionBoundsStateAddedAfterStartup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := session.Open(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestCh := make(chan holmes.Request, 1)
+	service := New(store, nil,
+		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+			requestCh <- request
+			return "ok", nil
+		}), &fakeSlack{}, Config{
+			AlertPayloadMaxBytes: 10, ConversationMaxTurns: 2,
+			ConversationMaxBytes: 6, SlackOutputMaxChars: 2500,
+		}, time.Now, nil)
+	if err := store.Update(func(snapshot *session.Snapshot) error {
+		snapshot.Sessions["am:A:ns"] = session.Record{
+			Key: "am:A:ns", Type: "alert", State: "active", Channel: "C1", ParentTS: "1", ThreadTS: "1",
+			AlertContext: json.RawMessage(`{"payload":"0123456789"}`),
+			Conversation: []session.ConversationTurn{
+				{Role: "user", Content: "1111"},
+				{Role: "assistant", Content: "2222"},
+				{Role: "user", Content: "3333"},
+			},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	service.handleMention(context.Background(), Event{Channel: "C1", Text: "question", TS: "2", ThreadTS: "1", Mention: true})
+	request := <-requestCh
+	if !strings.Contains(request.Ask, "<alertmanager_alerts>\n{}\n</alertmanager_alerts>") ||
+		len(request.ConversationHistory) > 3 || holmesHistoryBytes(request.ConversationHistory[1:]) > 6 {
+		t.Fatalf("request = %#v", request)
+	}
+	reopened, err := session.Open(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := reopened.Snapshot().Sessions["am:A:ns"]
+	if string(record.AlertContext) != `{}` || len(record.Conversation) > 2 || conversationBytes(record.Conversation) > 6 {
+		t.Fatalf("rewritten record = %#v", record)
+	}
+}
+
 func TestMentionInUnknownThreadCreatesAdhocSessionThere(t *testing.T) {
 	slack := &fakeSlack{}
 	service, store := startBehaviorService(t, nil,
@@ -1101,8 +1344,48 @@ func TestRepeatedExplicitQuestionExtendsConversation(t *testing.T) {
 	}
 }
 
+func TestAdhocExpiryStartsWhenAnswerCompletes(t *testing.T) {
+	startedAt := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	completedAt := startedAt.Add(5 * time.Minute)
+	now := startedAt
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, nil,
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			now = completedAt
+			return "answer", nil
+		}), &fakeSlack{}, Config{
+			AdhocSessionTTL: time.Hour, ConversationMaxTurns: 6,
+			ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, func() time.Time { return now }, nil)
+
+	service.handleMention(context.Background(), Event{Channel: "C1", Text: "question", TS: "1", Mention: true})
+	record := store.Snapshot().Sessions["slack:C1:1"]
+	if !record.UpdatedAt.Equal(completedAt) || !record.ExpiresAt.Equal(completedAt.Add(time.Hour)) {
+		t.Fatalf("updated = %v, expires = %v", record.UpdatedAt, record.ExpiresAt)
+	}
+}
+
 func storeSnapshotSession(store *session.Store, key string) session.Record {
 	return store.Snapshot().Sessions[key]
+}
+
+func conversationBytes(turns []session.ConversationTurn) int {
+	total := 0
+	for _, turn := range turns {
+		total += len(turn.Content)
+	}
+	return total
+}
+
+func holmesHistoryBytes(messages []holmes.Message) int {
+	total := 0
+	for _, message := range messages {
+		total += len(message.Content)
+	}
+	return total
 }
 
 func startBehaviorService(t *testing.T, am Alertmanager, h Holmes, slack *fakeSlack) (*Service, *session.Store) {
@@ -1218,16 +1501,22 @@ func waitFor(t *testing.T, condition func() bool) {
 	t.Fatal("condition was not met")
 }
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
+func restrictDirectoryReads(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root can bypass directory permissions")
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatal(err)
 	}
-	return true
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+}
+
+func metricsBody(t *testing.T, metrics *observability.Metrics) string {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	return recorder.Body.String()
 }
 
 func testURL(t *testing.T, raw string) *url.URL {

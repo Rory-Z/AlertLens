@@ -20,6 +20,9 @@ tests:
           path: spec.template.spec.automountServiceAccountToken
           value: false
       - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 35
+      - equal:
           path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
           value: true
       - contains:

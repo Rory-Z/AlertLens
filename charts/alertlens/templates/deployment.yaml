@@ -16,6 +16,7 @@ spec:
       labels:
         {{- include "alertlens.selectorLabels" . | nindent 8 }}
     spec:
+      terminationGracePeriodSeconds: 35
       serviceAccountName: {{ include "alertlens.fullname" . }}
       automountServiceAccountToken: false
       securityContext:

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"hash/fnv"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -13,6 +13,8 @@ import (
 	"github.com/emqx/alertlens/internal/observability"
 	"github.com/emqx/alertlens/internal/session"
 )
+
+const drainTimeout = 25 * time.Second
 
 type Event struct {
 	ID       string
@@ -67,6 +69,8 @@ type Service struct {
 	config       Config
 	now          func() time.Time
 	queue        chan work
+	intakeMu     sync.RWMutex
+	accepting    bool
 	sessionLocks [64]sync.Mutex
 	metrics      *observability.Metrics
 }
@@ -78,15 +82,16 @@ func New(store *session.Store, alertmanager Alertmanager, holmes Holmes, slack S
 	service := &Service{
 		store: store, alertmanager: alertmanager, holmes: holmes, slack: slack,
 		config: config, now: now, queue: make(chan work, config.QueueSize),
-		metrics: metrics,
+		metrics: metrics, accepting: true,
 	}
 	if store != nil {
 		if err := store.Update(func(snapshot *session.Snapshot) error {
 			for key, record := range snapshot.Sessions {
-				record.AlertContext = sanitizeJSON(record.AlertContext)
+				record.AlertContext = boundAlertContext(record.AlertContext, config.AlertPayloadMaxBytes)
 				for index := range record.Conversation {
 					record.Conversation[index].Content = sanitize(record.Conversation[index].Content)
 				}
+				record.Conversation = boundConversation(record.Conversation, config.ConversationMaxTurns, config.ConversationMaxBytes)
 				snapshot.Sessions[key] = record
 			}
 			return nil
@@ -104,6 +109,12 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 		s.metrics.Event("ignored")
 		return false
 	}
+	s.intakeMu.RLock()
+	if !s.accepting {
+		s.intakeMu.RUnlock()
+		s.metrics.Event("dropped")
+		return false
+	}
 	if event.ID != "" {
 		duplicate := false
 		now := s.now()
@@ -117,21 +128,27 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 		})
 		if err != nil {
 			s.metrics.PersistenceError()
-			s.metrics.Event("failed")
-			return false
+			if !session.UpdateCommitted(err) {
+				s.intakeMu.RUnlock()
+				s.metrics.Event("failed")
+				return false
+			}
 		}
 		if duplicate {
+			s.intakeMu.RUnlock()
 			s.metrics.Event("duplicate")
 			return false
 		}
 	}
-	s.addReaction(ctx, "eyes", event.Channel, event.TS)
 	select {
 	case s.queue <- work{event: event, identity: identity, mention: event.Mention}:
+		s.intakeMu.RUnlock()
 		s.metrics.Event("accepted")
 		s.metrics.QueueDepth(len(s.queue))
 		return true
 	default:
+		s.intakeMu.RUnlock()
+		s.addReaction(ctx, "eyes", event.Channel, event.TS)
 		s.metrics.Event("dropped")
 		s.transition(ctx, event, "eyes", "x")
 		return false
@@ -139,19 +156,17 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 }
 
 func (s *Service) Run(ctx context.Context) {
+	workCtx, cancelWork := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelWork()
 	var workers sync.WaitGroup
 	workers.Add(s.config.Workers)
 	for range s.config.Workers {
 		go func() {
 			defer workers.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case item := <-s.queue:
-					s.metrics.QueueDepth(len(s.queue))
-					s.handle(ctx, item)
-				}
+			for item := range s.queue {
+				s.metrics.QueueDepth(len(s.queue))
+				s.addReaction(workCtx, "eyes", item.event.Channel, item.event.TS)
+				s.handle(workCtx, item)
 			}
 		}()
 	}
@@ -160,7 +175,20 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			workers.Wait()
+			s.stopIntake()
+			done := make(chan struct{})
+			go func() {
+				workers.Wait()
+				close(done)
+			}()
+			timer := time.NewTimer(drainTimeout)
+			defer timer.Stop()
+			select {
+			case <-done:
+			case <-timer.C:
+				cancelWork()
+				<-done
+			}
 			return
 		case <-ticker.C:
 			if s.store != nil {
@@ -171,6 +199,15 @@ func (s *Service) Run(ctx context.Context) {
 				}
 			}
 		}
+	}
+}
+
+func (s *Service) stopIntake() {
+	s.intakeMu.Lock()
+	defer s.intakeMu.Unlock()
+	if s.accepting {
+		s.accepting = false
+		close(s.queue)
 	}
 }
 
@@ -224,9 +261,11 @@ func (s *Service) handle(ctx context.Context, item work) {
 	})
 	if err != nil {
 		s.metrics.PersistenceError()
-		s.metrics.Event("failed")
-		s.transition(ctx, item.event, "eyes", "x")
-		return
+		if !session.UpdateCommitted(err) {
+			s.metrics.Event("failed")
+			s.transition(ctx, item.event, "eyes", "x")
+			return
+		}
 	}
 	if !claimed {
 		s.metrics.Event("duplicate")
@@ -287,9 +326,10 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 	for index := range record.Conversation {
 		record.Conversation[index].Content = sanitize(record.Conversation[index].Content)
 	}
+	record.Conversation = boundConversation(record.Conversation, s.config.ConversationMaxTurns, s.config.ConversationMaxBytes)
 	prior := append([]session.ConversationTurn(nil), record.Conversation...)
 	question := sanitize(event.Text)
-	record.AlertContext = sanitizeJSON(record.AlertContext)
+	record.AlertContext = boundAlertContext(record.AlertContext, s.config.AlertPayloadMaxBytes)
 	record.Conversation = boundConversation(append(record.Conversation,
 		session.ConversationTurn{Role: "user", Content: question}),
 		s.config.ConversationMaxTurns, s.config.ConversationMaxBytes)
@@ -302,9 +342,11 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 		return nil
 	}); err != nil {
 		s.metrics.PersistenceError()
-		s.metrics.Event("failed")
-		s.transition(ctx, event, "eyes", "x")
-		return
+		if !session.UpdateCommitted(err) {
+			s.metrics.Event("failed")
+			s.transition(ctx, event, "eyes", "x")
+			return
+		}
 	}
 	s.metrics.Sessions(len(s.store.Snapshot().Sessions))
 	ask := "<untrusted_user_question>\n" + jsonString(truncateBytes(question, s.config.ConversationMaxBytes)) + "\n</untrusted_user_question>"
@@ -347,6 +389,9 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 			session.ConversationTurn{Role: "assistant", Content: answer}),
 			s.config.ConversationMaxTurns, s.config.ConversationMaxBytes)
 		record.UpdatedAt = s.now()
+		if record.Type == "adhoc" {
+			record.ExpiresAt = record.UpdatedAt.Add(s.config.AdhocSessionTTL)
+		}
 		snapshot.Sessions[key] = record
 		return nil
 	}); err != nil {
@@ -391,7 +436,7 @@ func (s *Service) lockAlertSession(identityKey string, event Event) func() {
 		unlock, shards := s.lockShards(keys...)
 		if current, exists := s.store.Snapshot().Sessions[identityKey]; exists {
 			currentShard := sessionShard(threadLockKey(current.Channel, sessionParent(current, newParentTS)))
-			if !containsShard(shards, currentShard) {
+			if !slices.Contains(shards, currentShard) {
 				unlock()
 				continue
 			}
@@ -409,11 +454,11 @@ func (s *Service) lockShards(keys ...string) (func(), []uint32) {
 	shards := make([]uint32, 0, len(keys))
 	for _, key := range keys {
 		shard := sessionShard(key)
-		if !containsShard(shards, shard) {
+		if !slices.Contains(shards, shard) {
 			shards = append(shards, shard)
 		}
 	}
-	sort.Slice(shards, func(left, right int) bool { return shards[left] < shards[right] })
+	slices.Sort(shards)
 	for _, shard := range shards {
 		s.sessionLocks[shard].Lock()
 	}
@@ -422,15 +467,6 @@ func (s *Service) lockShards(keys ...string) (func(), []uint32) {
 			s.sessionLocks[shards[index]].Unlock()
 		}
 	}, shards
-}
-
-func containsShard(shards []uint32, want uint32) bool {
-	for _, shard := range shards {
-		if shard == want {
-			return true
-		}
-	}
-	return false
 }
 
 func threadLockKey(channel, parentTS string) string {

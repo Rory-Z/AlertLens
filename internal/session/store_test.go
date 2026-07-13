@@ -263,6 +263,43 @@ func TestWriteFailureDegradesReadinessAndRollsBackMemoryState(t *testing.T) {
 	}
 }
 
+func TestUpdateReportsPostRenameFailureAsCommitted(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can bypass directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	store, err := Open(path, func() time.Time { return testNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	err = store.Update(func(snapshot *Snapshot) error {
+		snapshot.Sessions["committed"] = Record{Key: "committed"}
+		return nil
+	})
+	if err == nil || !UpdateCommitted(err) {
+		t.Fatalf("error = %v, committed = %t", err, UpdateCommitted(err))
+	}
+	if store.Snapshot().Sessions["committed"].Key != "committed" || store.Ready() == nil {
+		t.Fatalf("snapshot = %#v, ready error = %v", store.Snapshot(), store.Ready())
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path, func() time.Time { return testNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Snapshot().Sessions["committed"].Key != "committed" {
+		t.Fatalf("persisted snapshot = %#v", reopened.Snapshot())
+	}
+}
+
 func TestUpdateRetainingOnPersistenceFailureKeepsMemoryState(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(filepath.Join(dir, "state.json"), func() time.Time { return testNow })
