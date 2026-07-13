@@ -150,9 +150,10 @@ AlertLens in that thread and include the supplied run ID. The runner detects
 the follow-up automatically, resolves the alert, and verifies the final thread
 reply and reactions. The alert is resolved on normal failure paths; its
 one-hour `endsAt` is only a fallback for a forcibly terminated runner. This
-interactive test is not run in CI. Each HolmesGPT response may take up to 20
-minutes, the human step allows 10 minutes, resolution allows 7 minutes, and the
-test process has a 60-minute overall timeout.
+interactive test is not run in CI. The runner allows up to 20 minutes for each
+complete AlertLens response (including its 15-minute HolmesGPT call limit), 10
+minutes for the human step, 7 minutes for resolution, and 60 minutes for the
+overall test process.
 
 Alert on a missing Watchdog without depending on AlertLens to evaluate the condition:
 
