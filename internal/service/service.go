@@ -12,12 +12,14 @@ import (
 	"github.com/emqx/alertlens/internal/observability"
 )
 
-const defaultDrainTimeout = 25 * time.Second
+const (
+	defaultDrainTimeout            = 25 * time.Second
+	AlertmanagerFailureReplyPrefix = "⚠️ Alertmanager enrichment failed:"
+	HolmesFailureReplyPrefix       = "⚠️ Holmes request failed:"
+)
 
 type Event struct {
 	Channel  string
-	User     string
-	BotID    string
 	Text     string
 	TS       string
 	ThreadTS string
@@ -51,7 +53,6 @@ type Config struct {
 type work struct {
 	event    Event
 	identity marker.Alert
-	mention  bool
 }
 
 type Service struct {
@@ -103,7 +104,7 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 	}
 	s.addReaction(ctx, "eyes", event.Channel, event.TS)
 	select {
-	case s.queue <- work{event: event, identity: identity, mention: event.Mention}:
+	case s.queue <- work{event: event, identity: identity}:
 		s.intakeMu.RUnlock()
 		s.metrics.Event("accepted")
 		s.metrics.QueueDepth(len(s.queue))
@@ -158,7 +159,7 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 func (s *Service) handle(ctx context.Context, item work) {
-	if item.mention {
+	if item.event.Mention {
 		s.handleAsk(ctx, item.event)
 		return
 	}
@@ -175,7 +176,7 @@ func (s *Service) handle(ctx context.Context, item work) {
 	alerts, err := s.alertmanager.Active(ctx, item.identity.Alertname, item.identity.Namespace)
 	if err != nil {
 		s.metrics.Alertmanager("error", time.Since(started))
-		warning := "⚠️ Alertmanager enrichment failed: " + sanitize(err.Error()) +
+		warning := AlertmanagerFailureReplyPrefix + " " + sanitize(err.Error()) +
 			"\nRCA will continue without the current alert snapshot."
 		_ = s.slack.Reply(ctx, item.event.Channel, item.event.TS,
 			truncateSlack(warning, s.config.SlackOutputMaxChars))
@@ -238,7 +239,7 @@ func (s *Service) runHolmes(ctx context.Context, event Event, replyThreadTS stri
 		s.metrics.Holmes("error", time.Since(started))
 		s.metrics.Event("failed")
 		_ = s.slack.Reply(ctx, event.Channel, replyThreadTS,
-			truncateSlack("⚠️ Holmes request failed: "+sanitize(err.Error()), s.config.SlackOutputMaxChars))
+			truncateSlack(HolmesFailureReplyPrefix+" "+sanitize(err.Error()), s.config.SlackOutputMaxChars))
 		s.transition(ctx, event, "hourglass_flowing_sand", "x")
 		return false
 	}

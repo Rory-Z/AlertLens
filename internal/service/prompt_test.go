@@ -69,7 +69,7 @@ func TestSanitizeRedactsStandaloneSlackTokens(t *testing.T) {
 	}
 }
 
-func TestBuildRequestRedactsStandaloneSlackTokensFromPromptAndState(t *testing.T) {
+func TestBuildRequestRedactsStandaloneSlackTokensFromPrompt(t *testing.T) {
 	botToken := "xox" + "b-123456789012-123456789012-abcdefghijklmnopqrstuvwx"
 	appToken := "xap" + "p-1-A1234567890-1234567890-abcdef0123456789abcdef0123456789"
 	request := buildRequest(

@@ -142,8 +142,8 @@ func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS 
 }
 
 func failureReply(text string) bool {
-	return strings.HasPrefix(text, "⚠️ Alertmanager enrichment failed:") ||
-		strings.HasPrefix(text, "⚠️ Holmes request failed:")
+	return strings.HasPrefix(text, service.AlertmanagerFailureReplyPrefix) ||
+		strings.HasPrefix(text, service.HolmesFailureReplyPrefix)
 }
 
 func messageText(message slackapi.Message) string {
@@ -207,8 +207,8 @@ func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUs
 			return service.Event{}, false
 		}
 		return service.Event{
-			Channel: inner.Channel, User: inner.User, BotID: inner.BotID,
-			Text: strings.Join(parts, "\n"), TS: inner.TimeStamp, ThreadTS: inner.ThreadTimeStamp,
+			Channel: inner.Channel,
+			Text:    strings.Join(parts, "\n"), TS: inner.TimeStamp, ThreadTS: inner.ThreadTimeStamp,
 			Mention: true,
 		}, true
 	default:
@@ -238,8 +238,8 @@ func translateMessage(message *slackevents.MessageEvent, channels map[string]boo
 		return service.Event{}, false
 	}
 	return service.Event{
-		Channel: message.Channel, User: message.User, BotID: message.BotID,
-		Text: strings.Join(parts, "\n"), TS: message.TimeStamp, ThreadTS: message.ThreadTimeStamp,
+		Channel: message.Channel,
+		Text:    strings.Join(parts, "\n"), TS: message.TimeStamp, ThreadTS: message.ThreadTimeStamp,
 	}, true
 }
 

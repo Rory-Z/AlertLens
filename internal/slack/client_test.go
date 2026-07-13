@@ -43,9 +43,9 @@ func TestTranslateMessage(t *testing.T) {
 		t.Fatal("event rejected")
 	}
 	want := service.Event{
-		Channel: "C1", User: "U1", BotID: "B1",
-		Text: "FIRING HighCPU\n<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->\ndetails",
-		TS:   "100.1", ThreadTS: "99.1",
+		Channel: "C1",
+		Text:    "FIRING HighCPU\n<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->\ndetails",
+		TS:      "100.1", ThreadTS: "99.1",
 	}
 	if got != want {
 		t.Fatalf("event = %#v, want %#v", got, want)
@@ -97,7 +97,7 @@ func TestTranslateAppMention(t *testing.T) {
 			}
 			got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
 			if !ok || !got.Mention || got.Channel != "C1" ||
-				got.User != "U1" || got.Text != "investigate prod" || got.TS != "10.1" || got.ThreadTS != tt.threadTS {
+				got.Text != "investigate prod" || got.TS != "10.1" || got.ThreadTS != tt.threadTS {
 				t.Fatalf("translate() = (%#v, %v)", got, ok)
 			}
 		})
