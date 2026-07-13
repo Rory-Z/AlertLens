@@ -1,3 +1,7 @@
+## Contributing
+
+Before committing or opening or updating a pull request, read and follow `CONTRIBUTING.md`.
+
 ## Agent skills
 
 ### Issue tracker
