@@ -26,8 +26,10 @@ jobs:
           go tool cover -func=coverage.out | awk '/^total:/ { gsub("%", "", $3); if ($3 + 0 < 90) exit 1 }'
           go build ./cmd/alertlens
       - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.3
       - name: Install Helm unittest
-        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v1.1.1
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v1.1.1 --verify=false
       - name: Verify Helm chart
         run: |
           helm lint charts/alertlens \
