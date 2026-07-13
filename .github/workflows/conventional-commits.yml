@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          pattern='^[a-z][a-z0-9-]*(\([^()]+\))?!?: .+'
+          pattern='^[a-z][a-z0-9-]*(\([^()[:space:]]+\))?!?: .*[^[:space:]].*$'
 
           check() {
             local label=$1 message=$2
@@ -37,6 +37,7 @@ jobs:
 
           check "Pull request title" "$PR_TITLE"
 
-          while IFS= read -r subject; do
-            check "Commit subject" "$subject"
-          done < <(git log --format=%s "$BASE_SHA..$HEAD_SHA")
+          git log --format=%s "$BASE_SHA..$HEAD_SHA" |
+            while IFS= read -r subject; do
+              check "Commit subject" "$subject"
+            done
