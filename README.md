@@ -80,14 +80,76 @@ networkPolicy:
       ports: [80]
 ```
 
-For the FlowMQ dev cluster, the service URLs are:
+For the FlowMQ dev cluster, use `~/.kube/flowmq-dev-tiger.yaml` as the
+kubeconfig. The service URLs are:
 
 ```text
 http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093
 http://holmes-holmes.holmes.svc:80
 ```
 
-Namespace selectors keep this access stable when internal endpoint IPs change. A real smoke deployment also needs an image that the cluster can pull and a separate Slack App/test channel.
+Namespace selectors keep this access stable when internal endpoint IPs change. A real smoke deployment also needs an image that the cluster can pull and a separate Slack App. The dev E2E below shares Vigil's dev channel, so duplicate replies and reactions are expected.
+
+## Dev E2E
+
+The opt-in E2E exercises the ordinary AlertLens image against the real dev
+Alertmanager, HolmesGPT, and Slack workspace. It uses AlertLens's dedicated
+Slack App in Vigil's dev channel; never reuse Vigil's app token. Install and
+invite the AlertLens App first, then create a Secret with `bot-token` and
+`app-token` keys using the normal secret-management workflow. The Makefile
+never creates, updates, or deletes that Secret.
+
+The defaults are:
+
+| Variable | Default |
+| --- | --- |
+| `KUBECONFIG` | `~/.kube/flowmq-dev-tiger.yaml` |
+| `IMAGE` | `ghcr.io/rory-z/alertlens:latest` |
+| `E2E_NAMESPACE` | `alertlens-e2e` |
+| `E2E_RELEASE` | `alertlens-e2e` |
+| `E2E_SLACK_SECRET` | `alertlens-e2e-slack` |
+| `E2E_SLACK_CHANNEL` | `C099FMSGNEQ` |
+| `E2E_STORAGE_CLASS` | `gp3` |
+| `E2E_ALERTMANAGER_NAMESPACE` | `victoria` |
+| `E2E_ALERTMANAGER_SERVICE` | `vmalertmanager-victoria-metrics-k8s-stack` |
+| `E2E_ALERTMANAGER_URL` | `http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093` |
+| `E2E_ALERTMANAGER_PORT` | `9093` |
+| `E2E_ALERTMANAGER_LOCAL_PORT` | `19093` |
+| `E2E_HOLMES_NAMESPACE` | `holmes` |
+| `E2E_HOLMES_URL` | `http://holmes-holmes.holmes.svc:80` |
+| `E2E_HOLMES_PORT` | `80` |
+
+Create the namespace before provisioning the Secret. Every default is a Make
+variable and can be overridden on the command line; an exported `KUBECONFIG`
+takes precedence over the default.
+
+```bash
+kubectl create namespace alertlens-e2e --dry-run=client -o yaml | kubectl apply -f -
+
+make build
+make push
+# Or build and push in one step; IMAGE_PLATFORMS is optional:
+make build-push
+make build-push IMAGE_PLATFORMS=linux/amd64,linux/arm64
+
+make e2e-deploy
+make e2e-test
+make e2e-undeploy
+```
+
+`e2e-deploy` creates the namespace if needed, verifies the external Secret,
+forces the configured image to be pulled, applies namespace-based egress, and
+waits for the deployment to become Ready. `e2e-test` does not deploy anything:
+it verifies the release, reads the bot token from the Secret, and temporarily
+port-forwards Alertmanager to the local test process.
+
+The test injects a clearly labelled synthetic alert, waits for the RCA, and
+prints an `ACTION REQUIRED` prompt with a direct Slack thread link. Mention
+AlertLens in that thread and include the supplied run ID. The runner detects
+the follow-up automatically, resolves the alert, and verifies the final thread
+reply and reactions. The alert is resolved on normal failure paths; its
+one-hour `endsAt` is only a fallback for a forcibly terminated runner. This
+interactive test is not run in CI.
 
 Alert on a missing Watchdog without depending on AlertLens to evaluate the condition:
 

@@ -397,7 +397,8 @@ Unit tests are reserved for pure boundary logic:
 ### Contract and E2E Tests
 
 Sanitized real Slack and Alertmanager payload fixtures protect external
-contracts. One opt-in E2E uses a separate Slack App and test channel:
+contracts. One opt-in E2E uses a separate Slack App in Vigil's dev channel;
+duplicate replies and reactions are acceptable there:
 
 ```text
 firing -> RCA -> explicit follow-up -> resolved
@@ -421,7 +422,7 @@ Tests are not added solely to execute meaningless lines.
 
 ## Migration from Vigil
 
-1. Deploy AlertLens with a separate Slack App and test channel.
+1. Deploy AlertLens with a separate Slack App in Vigil's dev channel.
 2. Validate the full E2E flow without sharing Vigil's app token.
 3. Enable the two HolmesGPT VictoriaLogs instances.
 4. Stop Vigil before enabling AlertLens on the production alert channel.
