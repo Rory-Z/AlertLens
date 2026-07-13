@@ -66,7 +66,7 @@ The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 909
 
 Create a dedicated Secret whose keys are `bot-token` and `app-token`; do not put either token in Helm values. The chart requires an RWO PVC. If the cluster has no default StorageClass, set `state.storageClass` explicitly (the FlowMQ dev cluster uses `gp3`).
 
-The default NetworkPolicy permits DNS and any destination on TCP 443; native Kubernetes NetworkPolicy cannot enforce Slack FQDNs. Use a CNI FQDN policy or egress proxy when strict Slack-only HTTPS is required. The policy intentionally does not guess the internal network ranges for HolmesGPT and Alertmanager. Add the smallest pod or service CIDRs and the ports used by the configured URLs:
+The default NetworkPolicy permits DNS and any destination on TCP 443; native Kubernetes NetworkPolicy cannot enforce Slack FQDNs. Use a CNI FQDN policy or egress proxy when strict Slack-only HTTPS is required. Add the namespaces and ports used by HolmesGPT and Alertmanager:
 
 ```yaml
 state:
@@ -74,9 +74,9 @@ state:
 
 networkPolicy:
   internalEgress:
-    - cidr: <alertmanager-pod-or-service-cidr>
+    - namespace: victoria
       ports: [9093]
-    - cidr: <holmes-pod-or-service-cidr>
+    - namespace: holmes
       ports: [80]
 ```
 
@@ -87,7 +87,7 @@ http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093
 http://holmes-holmes.holmes.svc:80
 ```
 
-Internal endpoint IPs can change, so discover the current CIDRs at deployment time instead of committing them. A real smoke deployment also needs an image that the cluster can pull and a separate Slack App/test channel.
+Namespace selectors keep this access stable when internal endpoint IPs change. A real smoke deployment also needs an image that the cluster can pull and a separate Slack App/test channel.
 
 Alert on a missing Watchdog without depending on AlertLens to evaluate the condition:
 
