@@ -31,6 +31,8 @@ resources:
 
 networkPolicy:
   enabled: true
+  # Native NetworkPolicy permits any destination on TCP 443. Use a CNI FQDN
+  # policy or egress proxy when strict Slack-only HTTPS is required.
   # Add the smallest pod/service CIDRs needed for Alertmanager and HolmesGPT.
   internalEgress: []
   # - cidr: 10.0.0.0/24

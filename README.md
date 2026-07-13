@@ -66,7 +66,7 @@ The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 909
 
 Create a dedicated Secret whose keys are `bot-token` and `app-token`; do not put either token in Helm values. The chart requires an RWO PVC. If the cluster has no default StorageClass, set `state.storageClass` explicitly (the FlowMQ dev cluster uses `gp3`).
 
-The default NetworkPolicy permits DNS and Slack HTTPS but intentionally does not guess the internal network ranges for HolmesGPT and Alertmanager. Add the smallest pod or service CIDRs and the ports used by the configured URLs:
+The default NetworkPolicy permits DNS and any destination on TCP 443; native Kubernetes NetworkPolicy cannot enforce Slack FQDNs. Use a CNI FQDN policy or egress proxy when strict Slack-only HTTPS is required. The policy intentionally does not guess the internal network ranges for HolmesGPT and Alertmanager. Add the smallest pod or service CIDRs and the ports used by the configured URLs:
 
 ```yaml
 state:

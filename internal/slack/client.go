@@ -157,7 +157,7 @@ func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUs
 
 func translateMessage(eventID string, message *slackevents.MessageEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
 	if (message.SubType != "" && message.SubType != "bot_message") ||
-		!channels[message.Channel] || message.User == botUserID || message.TimeStamp == "" {
+		message.BotID == "" || !channels[message.Channel] || message.User == botUserID || message.TimeStamp == "" {
 		return service.Event{}, false
 	}
 	parts := make([]string, 0, 3)

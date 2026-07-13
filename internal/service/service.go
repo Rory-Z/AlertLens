@@ -253,7 +253,7 @@ func (s *Service) handle(ctx context.Context, item work) {
 		s.transition(ctx, item.event, "hourglass_flowing_sand", "x")
 		return
 	}
-	if err := s.store.Update(func(snapshot *session.Snapshot) error {
+	if err := s.store.UpdateRetainingOnPersistenceFailure(func(snapshot *session.Snapshot) error {
 		record := snapshot.Sessions[item.identity.Key()]
 		record.Conversation = []session.ConversationTurn{{Role: "assistant", Content: analysis}}
 		record.UpdatedAt = s.now()
@@ -307,7 +307,7 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 		return
 	}
 	s.metrics.Sessions(len(s.store.Snapshot().Sessions))
-	ask := "<untrusted_user_question>\n" + truncateBytes(question, s.config.ConversationMaxBytes) + "\n</untrusted_user_question>"
+	ask := "<untrusted_user_question>\n" + jsonString(truncateBytes(question, s.config.ConversationMaxBytes)) + "\n</untrusted_user_question>"
 	requestSource := "freeform"
 	if record.Type == "alert" {
 		requestSource = "alert_followup"
@@ -337,7 +337,7 @@ func (s *Service) handleMention(ctx context.Context, event Event) {
 		return
 	}
 	retained := true
-	if err := s.store.Update(func(snapshot *session.Snapshot) error {
+	if err := s.store.UpdateRetainingOnPersistenceFailure(func(snapshot *session.Snapshot) error {
 		record, exists := snapshot.Sessions[key]
 		if !exists {
 			retained = false
@@ -467,7 +467,7 @@ func (s *Service) resolve(ctx context.Context, item work) {
 	s.addReaction(ctx, "large_green_circle", item.event.Channel, item.event.TS)
 	s.addReaction(ctx, "large_green_circle", record.Channel, record.ParentTS)
 	now := s.now()
-	if err := s.store.Update(func(snapshot *session.Snapshot) error {
+	if err := s.store.UpdateRetainingOnPersistenceFailure(func(snapshot *session.Snapshot) error {
 		record := snapshot.Sessions[item.identity.Key()]
 		record.State = "resolved"
 		record.UpdatedAt = now

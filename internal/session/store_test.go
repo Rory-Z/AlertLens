@@ -225,19 +225,15 @@ func TestUpdateEncodeFailureDegradesReadiness(t *testing.T) {
 	}
 }
 
-func TestWriteFailureDegradesReadinessAndKeepsMemoryState(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses directory permissions")
-	}
+func TestWriteFailureDegradesReadinessAndRollsBackMemoryState(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(filepath.Join(dir, "state.json"), func() time.Time { return testNow })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(dir, 0o500); err != nil {
+	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	err = store.Update(func(snapshot *Snapshot) error {
 		snapshot.Sessions["lost"] = Record{Key: "lost"}
@@ -246,11 +242,11 @@ func TestWriteFailureDegradesReadinessAndKeepsMemoryState(t *testing.T) {
 	if err == nil || store.Ready() == nil {
 		t.Fatalf("write error = %v, ready error = %v", err, store.Ready())
 	}
-	if store.Snapshot().Sessions["lost"].Key != "lost" {
-		t.Fatalf("failed write lost memory state: %#v", store.Snapshot())
+	if _, exists := store.Snapshot().Sessions["lost"]; exists {
+		t.Fatalf("failed write changed memory state: %#v", store.Snapshot())
 	}
 
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Update(func(snapshot *Snapshot) error {
@@ -262,7 +258,45 @@ func TestWriteFailureDegradesReadinessAndKeepsMemoryState(t *testing.T) {
 	if err := store.Ready(); err != nil {
 		t.Fatalf("readiness did not recover: %v", err)
 	}
-	if got := store.Snapshot(); got.Sessions["lost"].Key != "lost" || got.Sessions["saved"].Key != "saved" {
+	if got := store.Snapshot(); len(got.Sessions) != 1 || got.Sessions["saved"].Key != "saved" {
+		t.Fatalf("recovered snapshot = %#v", got)
+	}
+}
+
+func TestUpdateRetainingOnPersistenceFailureKeepsMemoryState(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "state.json"), func() time.Time { return testNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	err = store.UpdateRetainingOnPersistenceFailure(func(snapshot *Snapshot) error {
+		snapshot.Sessions["retained"] = Record{Key: "retained"}
+		return nil
+	})
+	if err == nil || store.Ready() == nil {
+		t.Fatalf("write error = %v, ready error = %v", err, store.Ready())
+	}
+	if store.Snapshot().Sessions["retained"].Key != "retained" {
+		t.Fatalf("failed write lost retained memory state: %#v", store.Snapshot())
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(func(snapshot *Snapshot) error {
+		snapshot.Sessions["saved"] = Record{Key: "saved"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Ready(); err != nil {
+		t.Fatalf("readiness did not recover: %v", err)
+	}
+	if got := store.Snapshot(); got.Sessions["retained"].Key != "retained" || got.Sessions["saved"].Key != "saved" {
 		t.Fatalf("recovered snapshot = %#v", got)
 	}
 }

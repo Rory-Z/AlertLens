@@ -66,6 +66,14 @@ func (s *Store) Snapshot() Snapshot {
 }
 
 func (s *Store) Update(update func(*Snapshot) error) error {
+	return s.update(update, false)
+}
+
+func (s *Store) UpdateRetainingOnPersistenceFailure(update func(*Snapshot) error) error {
+	return s.update(update, true)
+}
+
+func (s *Store) update(update func(*Snapshot) error, retainOnPersistenceFailure bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -74,14 +82,10 @@ func (s *Store) Update(update func(*Snapshot) error) error {
 		return err
 	}
 	committed, err := s.persist(next)
-	if committed {
+	if committed || retainOnPersistenceFailure {
 		s.snapshot = next
 	}
 	if err != nil {
-		var encodeErr *stateEncodeError
-		if !errors.As(err, &encodeErr) {
-			s.snapshot = next
-		}
 		s.readyErr = err
 		return err
 	}
@@ -106,7 +110,7 @@ func (s *Store) Prune(now time.Time) error {
 func (s *Store) persist(snapshot Snapshot) (bool, error) {
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
-		return false, &stateEncodeError{err: err}
+		return false, fmt.Errorf("encode state: %w", err)
 	}
 	data = append(data, '\n')
 
@@ -144,18 +148,6 @@ func (s *Store) persist(snapshot Snapshot) (bool, error) {
 		return true, fmt.Errorf("sync state directory: %w", err)
 	}
 	return true, nil
-}
-
-type stateEncodeError struct {
-	err error
-}
-
-func (e *stateEncodeError) Error() string {
-	return fmt.Sprintf("encode state: %v", e.err)
-}
-
-func (e *stateEncodeError) Unwrap() error {
-	return e.err
 }
 
 func prune(snapshot *Snapshot, now time.Time) {

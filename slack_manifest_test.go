@@ -59,7 +59,7 @@ func TestSlackManifestEnvironments(t *testing.T) {
 				t.Fatalf("unrendered placeholder in %q", output)
 			}
 			var got slackManifest
-			if err := yaml.Unmarshal(output, &got); err != nil {
+			if err := yaml.UnmarshalStrict(output, &got); err != nil {
 				t.Fatal(err)
 			}
 			if got.Metadata.MajorVersion != 1 ||

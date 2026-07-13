@@ -59,7 +59,7 @@ func TestTranslateUsesNestedMessageFallback(t *testing.T) {
 		Type: slackevents.CallbackEvent,
 		Data: slackevents.EventsAPICallbackEvent{EventID: "Ev2"},
 		InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MessageEvent{
-			User: "U1", TimeStamp: "1", Channel: "C1", Message: &slackapi.Msg{Text: "fallback"},
+			User: "U1", BotID: "B1", TimeStamp: "1", Channel: "C1", Message: &slackapi.Msg{Text: "fallback"},
 		}},
 	}
 	got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
@@ -137,10 +137,19 @@ func TestTranslateRejectsIrrelevantMessages(t *testing.T) {
 			Type: slackevents.CallbackEvent,
 			Data: &slackevents.EventsAPICallbackEvent{EventID: "Ev1"},
 			InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MessageEvent{
-				User: "U1", Text: "hello", TimeStamp: "1", Channel: "C1",
+				User: "U1", BotID: "B1", Text: "hello", TimeStamp: "1", Channel: "C1",
 			}},
 		}
 	}
+	t.Run("human marker", func(t *testing.T) {
+		event := base()
+		message := event.InnerEvent.Data.(*slackevents.MessageEvent)
+		message.BotID = ""
+		message.Text = `<!-- alertlens:alertname=A,namespace=ns -->`
+		if _, ok := translate(event, map[string]bool{"C1": true}, "U_SELF"); ok {
+			t.Fatal("human marker accepted")
+		}
+	})
 	t.Run("unmonitored channel", func(t *testing.T) {
 		if _, ok := translate(base(), map[string]bool{"C2": true}, "U_SELF"); ok {
 			t.Fatal("event accepted")
@@ -315,7 +324,7 @@ func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 			Type: slackevents.CallbackEvent,
 			Data: &slackevents.EventsAPICallbackEvent{EventID: "Ev1"},
 			InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MessageEvent{
-				User: "U1", Text: `<!-- alertlens:alertname=A,namespace= -->`, TimeStamp: "1", Channel: "C1",
+				User: "U1", BotID: "B1", Text: `<!-- alertlens:alertname=A,namespace= -->`, TimeStamp: "1", Channel: "C1",
 			}},
 		},
 		Request: &socketmode.Request{EnvelopeID: "env1"},
