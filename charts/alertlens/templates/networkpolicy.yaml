@@ -33,9 +33,13 @@ spec:
         - protocol: TCP
           port: 443
     {{- range .Values.networkPolicy.internalEgress }}
+    {{- if not .ports }}
+    {{- fail "networkPolicy.internalEgress[].ports is required" }}
+    {{- end }}
     - to:
-        - ipBlock:
-            cidr: {{ required "networkPolicy.internalEgress[].cidr is required" .cidr }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "networkPolicy.internalEgress[].namespace is required" .namespace | quote }}
       ports:
         {{- range .ports }}
         - protocol: TCP

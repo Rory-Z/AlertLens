@@ -1,0 +1,40 @@
+suite: network policy
+templates:
+  - templates/networkpolicy.yaml
+tests:
+  - it: permits only configured ports in internal namespaces
+    set:
+      networkPolicy.internalEgress:
+        - namespace: victoria
+          ports: [9093]
+        - namespace: holmes
+          ports: [80]
+    asserts:
+      - equal:
+          path: spec.egress[2]
+          value:
+            to:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: victoria
+            ports:
+              - protocol: TCP
+                port: 9093
+      - equal:
+          path: spec.egress[3]
+          value:
+            to:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: holmes
+            ports:
+              - protocol: TCP
+                port: 80
+  - it: rejects an internal namespace without ports
+    set:
+      networkPolicy.internalEgress:
+        - namespace: victoria
+          ports: []
+    asserts:
+      - failedTemplate:
+          errorMessage: networkPolicy.internalEgress[].ports is required
