@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/emqx/alertlens
+  repository: ghcr.io/rory-z/alertlens
   tag: ""
   pullPolicy: IfNotPresent
 
