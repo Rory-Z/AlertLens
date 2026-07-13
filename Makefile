@@ -35,6 +35,11 @@ build-push:
 
 e2e-deploy:
 	@set -eu; \
+	image='$(IMAGE)'; \
+	case "$$image" in *@*) echo "IMAGE must use repository:tag, not a digest" >&2; exit 1;; esac; \
+	case "$${image##*/}" in *:*) ;; *) echo "IMAGE must include a tag" >&2; exit 1;; esac; \
+	repository=$${image%:*}; tag=$${image##*:}; \
+	if [ -z "$$tag" ]; then echo "IMAGE must include a tag" >&2; exit 1; fi; \
 	kubectl create namespace "$(E2E_NAMESPACE)" --dry-run=client -o yaml | kubectl apply -f -; \
 	if ! kubectl -n "$(E2E_NAMESPACE)" get secret "$(E2E_SLACK_SECRET)" >/dev/null 2>&1; then \
 		echo "missing Secret $(E2E_NAMESPACE)/$(E2E_SLACK_SECRET); create bot-token and app-token keys first" >&2; \
@@ -44,8 +49,6 @@ e2e-deploy:
 		value=$$(kubectl -n "$(E2E_NAMESPACE)" get secret "$(E2E_SLACK_SECRET)" -o "jsonpath={.data.$$key}"); \
 		if [ -z "$$value" ]; then echo "Secret $(E2E_SLACK_SECRET) is missing $$key" >&2; exit 1; fi; \
 	done; \
-	image='$(IMAGE)'; repository=$${image%:*}; tag=$${image##*:}; \
-	if [ "$$repository" = "$$image" ] || [ -z "$$tag" ]; then echo "IMAGE must include a tag" >&2; exit 1; fi; \
 	helm upgrade --install "$(E2E_RELEASE)" charts/alertlens \
 		--namespace "$(E2E_NAMESPACE)" \
 		--wait --timeout 5m \

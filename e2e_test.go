@@ -168,7 +168,7 @@ func TestE2E(t *testing.T) {
 	}
 	resolved = true
 
-	settled := false
+	completeOnPreviousPoll := false
 	final := waitFor(t, "AlertLens resolution", resolveTimeout, func(ctx context.Context) (resolvedState, bool, error) {
 		history, err := channelHistory(ctx, slack, channel, slackTimestamp(resolveStarted.Add(-time.Second)))
 		if err != nil {
@@ -204,13 +204,13 @@ func TestE2E(t *testing.T) {
 			return state, true, nil
 		}
 		if !done {
-			settled = false
+			completeOnPreviousPoll = false
 			return state, false, nil
 		}
-		if settled {
+		if completeOnPreviousPoll {
 			return state, true, nil
 		}
-		settled = true
+		completeOnPreviousPoll = true
 		return state, false, nil
 	})
 	if reactedBy(final.resolved, "x", bot) {
@@ -229,16 +229,15 @@ func requiredEnv(t *testing.T, name string) string {
 }
 
 func postAlert(ctx context.Context, baseURL string, alert syntheticAlert) error {
-	endpoint, err := url.Parse(baseURL)
+	endpoint, err := url.JoinPath(baseURL, "api/v2/alerts")
 	if err != nil {
 		return err
 	}
-	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/v2/alerts"
 	body, err := json.Marshal([]syntheticAlert{alert})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

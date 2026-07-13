@@ -121,7 +121,8 @@ The defaults are:
 
 Create the namespace before provisioning the Secret. Every default is a Make
 variable and can be overridden on the command line; an exported `KUBECONFIG`
-takes precedence over the default.
+takes precedence over the default. `IMAGE` must use `repository:tag` form;
+tagless and digest references are rejected.
 
 ```bash
 kubectl create namespace alertlens-e2e --dry-run=client -o yaml | kubectl apply -f -
@@ -149,7 +150,9 @@ AlertLens in that thread and include the supplied run ID. The runner detects
 the follow-up automatically, resolves the alert, and verifies the final thread
 reply and reactions. The alert is resolved on normal failure paths; its
 one-hour `endsAt` is only a fallback for a forcibly terminated runner. This
-interactive test is not run in CI.
+interactive test is not run in CI. Each HolmesGPT response may take up to 20
+minutes, the human step allows 10 minutes, resolution allows 7 minutes, and the
+test process has a 60-minute overall timeout.
 
 Alert on a missing Watchdog without depending on AlertLens to evaluate the condition:
 
