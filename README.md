@@ -179,4 +179,4 @@ helm lint charts/alertlens \
   --set holmesURL=http://holmes:5050
 ```
 
-CI rejects statement coverage below 90% and also runs Helm unit tests and a container build.
+CI also runs Helm unit tests and a container build.
