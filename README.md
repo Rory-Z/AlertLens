@@ -164,6 +164,9 @@ or time() - alertlens_watchdog_last_seen_timestamp > 300
 
 ## Verification
 
+Follow the [testing guidelines](CONTRIBUTING.md#testing) for TDD, integration
+coverage, and the testing trophy.
+
 ```bash
 test -z "$(gofmt -l .)"
 go vet ./...
@@ -176,4 +179,4 @@ helm lint charts/alertlens \
   --set holmesURL=http://holmes:5050
 ```
 
-CI rejects statement coverage below 90% and also runs Helm unit tests and a container build.
+CI also runs Helm unit tests and a container build.

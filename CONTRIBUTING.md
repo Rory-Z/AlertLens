@@ -1,5 +1,36 @@
 # Contributing
 
+## Testing
+
+Feature changes and bug fixes follow test-driven development:
+
+1. Add an integration test that fails for the intended behavior.
+2. Make the smallest production change that passes the test.
+3. Refactor while keeping the test suite green.
+
+AlertLens follows the testing trophy, with integration tests providing most
+behavioral coverage:
+
+- Integration tests assemble real production components, replace only
+  out-of-process network transports or external systems, and assert observable
+  behavior instead of mocking internal implementation.
+- Every behavior change must have integration coverage. Unit tests are reserved
+  for pure boundary logic such as parsing, validation, sanitization, and
+  serialization; they do not replace tests of component collaboration.
+- Contract tests protect external protocols and payloads. Opt-in real-system E2E
+  tests cover only a small number of critical cross-system paths.
+
+Before submitting a change, run the race-enabled test suite and inspect total
+statement coverage:
+
+```bash
+go test -race -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+CI rejects total statement coverage below 90%. Do not lower the threshold or
+exclude code from coverage to make a change pass.
+
 ## Commit Messages and Pull Request Titles
 
 Every commit subject and pull request title must follow
