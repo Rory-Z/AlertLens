@@ -1,0 +1,34 @@
+name: Helm
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  helm:
+    name: Helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.3
+      - name: Install Helm unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v1.1.1 --verify=false
+      - name: Verify Helm chart
+        run: |
+          helm lint charts/alertlens \
+            --set slack.existingSecret=alertlens-slack \
+            --set-string 'slack.alertChannels[0]=C1' \
+            --set alertmanagerURL=http://alertmanager:9093 \
+            --set holmesURL=http://holmes:5050
+          helm unittest charts/alertlens

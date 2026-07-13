@@ -12,7 +12,7 @@ on:
         required: false
         type: string
       create_tag:
-        description: Create a tag and start the release workflow
+        description: Create a tag and start the Docker and release workflows
         required: true
         type: boolean
         default: true
@@ -78,8 +78,8 @@ jobs:
           git tag -a "$VERSION" -m "Release $VERSION"
           git push origin "$VERSION"
 
-      - name: Start release
+      - name: Start Docker publish
         if: ${{ inputs.create_tag }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run release.yaml --ref "$VERSION"
+        run: gh workflow run docker.yml --ref "$VERSION"
