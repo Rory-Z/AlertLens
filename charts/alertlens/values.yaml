@@ -1,0 +1,39 @@
+image:
+  repository: ghcr.io/emqx/alertlens
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+slack:
+  existingSecret: ""
+  alertChannels: []
+
+alertmanagerURL: ""
+holmesURL: ""
+
+state:
+  storageClass: ""
+  size: 1Gi
+
+service:
+  port: 9090
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+networkPolicy:
+  enabled: true
+  # Native NetworkPolicy permits any destination on TCP 443. Use a CNI FQDN
+  # policy or egress proxy when strict Slack-only HTTPS is required.
+  # Add the smallest pod/service CIDRs needed for Alertmanager and HolmesGPT.
+  internalEgress: []
+  # - cidr: 10.0.0.0/24
+  #   ports: [9093, 5050]
