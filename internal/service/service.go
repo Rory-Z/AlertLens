@@ -14,7 +14,7 @@ import (
 	"github.com/emqx/alertlens/internal/session"
 )
 
-const drainTimeout = 25 * time.Second
+const defaultDrainTimeout = 25 * time.Second
 
 type Event struct {
 	ID       string
@@ -68,6 +68,7 @@ type Service struct {
 	slack        Slack
 	config       Config
 	now          func() time.Time
+	drainTimeout time.Duration
 	queue        chan work
 	intakeMu     sync.RWMutex
 	accepting    bool
@@ -81,7 +82,7 @@ func New(store *session.Store, alertmanager Alertmanager, holmes Holmes, slack S
 	}
 	service := &Service{
 		store: store, alertmanager: alertmanager, holmes: holmes, slack: slack,
-		config: config, now: now, queue: make(chan work, config.QueueSize),
+		config: config, now: now, drainTimeout: defaultDrainTimeout, queue: make(chan work, config.QueueSize),
 		metrics: metrics, accepting: true,
 	}
 	if store != nil {
@@ -140,6 +141,7 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 			return false
 		}
 	}
+	s.addReaction(ctx, "eyes", event.Channel, event.TS)
 	select {
 	case s.queue <- work{event: event, identity: identity, mention: event.Mention}:
 		s.intakeMu.RUnlock()
@@ -148,7 +150,6 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 		return true
 	default:
 		s.intakeMu.RUnlock()
-		s.addReaction(ctx, "eyes", event.Channel, event.TS)
 		s.metrics.Event("dropped")
 		s.transition(ctx, event, "eyes", "x")
 		return false
@@ -163,10 +164,20 @@ func (s *Service) Run(ctx context.Context) {
 	for range s.config.Workers {
 		go func() {
 			defer workers.Done()
-			for item := range s.queue {
-				s.metrics.QueueDepth(len(s.queue))
-				s.addReaction(workCtx, "eyes", item.event.Channel, item.event.TS)
-				s.handle(workCtx, item)
+			for {
+				if workCtx.Err() != nil {
+					return
+				}
+				select {
+				case <-workCtx.Done():
+					return
+				case item, ok := <-s.queue:
+					if !ok {
+						return
+					}
+					s.metrics.QueueDepth(len(s.queue))
+					s.handle(workCtx, item)
+				}
 			}
 		}()
 	}
@@ -175,13 +186,18 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.stopIntake()
+			s.intakeMu.Lock()
+			if s.accepting {
+				s.accepting = false
+				close(s.queue)
+			}
+			s.intakeMu.Unlock()
 			done := make(chan struct{})
 			go func() {
 				workers.Wait()
 				close(done)
 			}()
-			timer := time.NewTimer(drainTimeout)
+			timer := time.NewTimer(s.drainTimeout)
 			defer timer.Stop()
 			select {
 			case <-done:
@@ -199,15 +215,6 @@ func (s *Service) Run(ctx context.Context) {
 				}
 			}
 		}
-	}
-}
-
-func (s *Service) stopIntake() {
-	s.intakeMu.Lock()
-	defer s.intakeMu.Unlock()
-	if s.accepting {
-		s.accepting = false
-		close(s.queue)
 	}
 }
 

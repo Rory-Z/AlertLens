@@ -243,7 +243,9 @@ func TestCommittedEventReceiptStillQueuesOnce(t *testing.T) {
 	if len(service.queue) != 1 || store.Snapshot().EventIDs[event.ID].IsZero() || store.Ready() == nil {
 		t.Fatalf("queue depth = %d, snapshot = %#v, ready error = %v", len(service.queue), store.Snapshot(), store.Ready())
 	}
-	if body := metricsBody(t, service.metrics); !strings.Contains(body, "alertlens_persistence_errors_total 1") {
+	recorder := httptest.NewRecorder()
+	service.metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if body := recorder.Body.String(); !strings.Contains(body, "alertlens_persistence_errors_total 1") {
 		t.Fatalf("metrics = %s", body)
 	}
 }
@@ -645,6 +647,88 @@ func TestRunDrainsAcceptedWorkBeforeReturning(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("Holmes calls = %d", calls.Load())
+	}
+}
+
+func TestQueuedAcceptedWorkGetsEyesImmediately(t *testing.T) {
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	slack := &fakeSlack{}
+	service := New(store, nil,
+		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+			if request.SourceRef == "slack:C1:1" {
+				close(firstStarted)
+				<-releaseFirst
+			}
+			return "answer", nil
+		}), slack, Config{
+			QueueSize: 2, Workers: 1, AdhocSessionTTL: time.Hour,
+			ConversationMaxTurns: 6, ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, time.Now, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() { close(releaseFirst) })
+
+	if !service.Submit(context.Background(), Event{Channel: "C1", Text: "first", TS: "1", Mention: true}) {
+		t.Fatal("first work item was rejected")
+	}
+	<-firstStarted
+	if !service.Submit(context.Background(), Event{Channel: "C1", Text: "second", TS: "2", Mention: true}) {
+		t.Fatal("second work item was rejected")
+	}
+	if !slack.hasReaction("add:eyes:C1:2") {
+		t.Fatal("queued accepted work did not receive eyes before Submit returned")
+	}
+}
+
+func TestDrainCeilingStopsDequeuingBacklog(t *testing.T) {
+	store, err := session.Open(filepath.Join(t.TempDir(), "state.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstStarted := make(chan struct{})
+	var calls atomic.Int32
+	service := New(store, nil,
+		holmesFunc(func(ctx context.Context, _ holmes.Request) (string, error) {
+			if calls.Add(1) == 1 {
+				close(firstStarted)
+				<-ctx.Done()
+				return "", ctx.Err()
+			}
+			return "answer", nil
+		}), &fakeSlack{}, Config{
+			QueueSize: 3, Workers: 1, AdhocSessionTTL: time.Hour,
+			ConversationMaxTurns: 6, ConversationMaxBytes: 16384, SlackOutputMaxChars: 2500,
+		}, time.Now, nil)
+	service.drainTimeout = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	if !service.Submit(context.Background(), Event{Channel: "C1", Text: "first", TS: "1", Mention: true}) {
+		t.Fatal("first work item was rejected")
+	}
+	<-firstStarted
+	for _, ts := range []string{"2", "3"} {
+		if !service.Submit(context.Background(), Event{Channel: "C1", Text: "queued", TS: ts, Mention: true}) {
+			t.Fatalf("work item %s was rejected", ts)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after the drain ceiling")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("Holmes calls = %d; backlog was dequeued after the drain ceiling", calls.Load())
 	}
 }
 
@@ -1510,13 +1594,6 @@ func restrictDirectoryReads(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-}
-
-func metricsBody(t *testing.T, metrics *observability.Metrics) string {
-	t.Helper()
-	recorder := httptest.NewRecorder()
-	metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	return recorder.Body.String()
 }
 
 func testURL(t *testing.T, raw string) *url.URL {
