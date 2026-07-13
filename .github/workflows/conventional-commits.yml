@@ -1,0 +1,43 @@
+name: Conventional Commits
+
+"on":
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check pull request title and commit subjects
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pattern='^[a-z][a-z0-9-]*(\([^()[:space:]]+\))?!?: .*[^[:space:]].*$'
+
+          check() {
+            local label=$1 message=$2
+            if [[ ! $message =~ $pattern ]]; then
+              echo "::error::$label has invalid format: $message"
+              return 1
+            fi
+          }
+
+          check "Pull request title" "$PR_TITLE"
+
+          git log --format=%s "$BASE_SHA..$HEAD_SHA" |
+            while IFS= read -r subject; do
+              check "Commit subject" "$subject"
+            done
