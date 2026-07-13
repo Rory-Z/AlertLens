@@ -29,7 +29,6 @@ jobs:
           echo "tag=$(awk '$1 == "appVersion:" { gsub(/\"/, "", $2); print $2; exit }' charts/alertlens/Chart.yaml)" >> "$GITHUB_OUTPUT"
       - name: Verify chart version
         if: ${{ github.ref_type == 'tag' }}
-        shell: bash
         run: |
           chart_version=$(awk '$1 == "version:" { print $2; exit }' charts/alertlens/Chart.yaml)
           test "$chart_version" = "${GITHUB_REF_NAME#v}"

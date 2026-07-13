@@ -19,7 +19,6 @@ jobs:
       - uses: actions/checkout@v7.0.0
 
       - name: Verify chart version
-        shell: bash
         run: |
           chart_version=$(awk '$1 == "version:" { print $2; exit }' charts/alertlens/Chart.yaml)
           test "$chart_version" = "${GITHUB_REF_NAME#v}"

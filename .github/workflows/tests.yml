@@ -22,9 +22,7 @@ jobs:
       - uses: actions/setup-go@v6.5.0
         with:
           go-version-file: go.mod
-          cache: true
       - name: Run tests
         run: |
           go test -race -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out
-          go tool cover -func=coverage.out | awk '/^total:/ { gsub("%", "", $3); if ($3 + 0 < 90) exit 1 }'
+          go tool cover -func=coverage.out | awk '{ print } /^total:/ { gsub("%", "", $3); if ($3 + 0 < 90) exit 1 }'
