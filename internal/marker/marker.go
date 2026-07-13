@@ -11,10 +11,15 @@ var markerPattern = regexp.MustCompile(`(?s)<!--\s*(?:alertlens|vigil)\s*:(.*?)-
 type Alert struct {
 	Alertname string `json:"alertname"`
 	Namespace string `json:"namespace"`
+	Status    string `json:"-"`
 }
 
 func (a Alert) Key() string {
 	return "am:" + a.Alertname + ":" + a.Namespace
+}
+
+func Present(text string) bool {
+	return markerPattern.MatchString(html.UnescapeString(text))
 }
 
 func Parse(text string) (Alert, bool) {
@@ -32,8 +37,9 @@ func Parse(text string) (Alert, bool) {
 	}
 	alertname, hasAlertname := fields["alertname"]
 	namespace, hasNamespace := fields["namespace"]
-	if !hasAlertname || alertname == "" || !hasNamespace {
+	status := fields["status"]
+	if !hasAlertname || alertname == "" || !hasNamespace || (status != "firing" && status != "resolved") {
 		return Alert{}, false
 	}
-	return Alert{Alertname: alertname, Namespace: namespace}, true
+	return Alert{Alertname: alertname, Namespace: namespace, Status: status}, true
 }

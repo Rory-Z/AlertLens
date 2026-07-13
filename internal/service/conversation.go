@@ -2,35 +2,48 @@ package service
 
 import (
 	"github.com/emqx/alertlens/internal/holmes"
-	"github.com/emqx/alertlens/internal/session"
 )
 
-func boundConversation(turns []session.ConversationTurn, maxTurns, maxBytes int) []session.ConversationTurn {
-	if maxTurns <= 0 || maxBytes <= 0 {
+type ConversationMessage struct {
+	Role    string
+	Content string
+}
+
+func boundConversation(messages []ConversationMessage, maxBytes int) []ConversationMessage {
+	if len(messages) == 0 || maxBytes <= 0 {
 		return nil
 	}
-	result := make([]session.ConversationTurn, 0, maxTurns)
-	remaining := maxBytes
-	for i := len(turns) - 1; i >= 0 && len(result) < maxTurns && remaining > 0; i-- {
-		turn := turns[i]
-		turn.Content = truncateBytes(turn.Content, remaining)
-		remaining -= len(turn.Content)
-		result = append(result, turn)
+	root := messages[0]
+	root.Content = truncateBytes(sanitize(root.Content), maxBytes)
+	result := []ConversationMessage{root}
+	remaining := maxBytes - len(root.Content)
+	newest := make([]ConversationMessage, 0, len(messages)-1)
+	for index := len(messages) - 1; index > 0; index-- {
+		if remaining == 0 {
+			break
+		}
+		message := messages[index]
+		message.Content = sanitize(message.Content)
+		if len(message.Content) > remaining {
+			message.Content = truncateBytes(message.Content, remaining)
+		}
+		remaining -= len(message.Content)
+		newest = append(newest, message)
 	}
-	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
-		result[left], result[right] = result[right], result[left]
+	for index := len(newest) - 1; index >= 0; index-- {
+		result = append(result, newest[index])
 	}
 	return result
 }
 
-func conversationHistory(turns []session.ConversationTurn) []holmes.Message {
-	if len(turns) == 0 {
+func conversationHistory(messages []ConversationMessage) []holmes.Message {
+	if len(messages) == 0 {
 		return nil
 	}
-	history := make([]holmes.Message, 1, len(turns)+1)
+	history := make([]holmes.Message, 1, len(messages)+1)
 	history[0] = holmes.Message{Role: "system", Content: investigationSystemPrompt}
-	for _, turn := range turns {
-		history = append(history, holmes.Message{Role: turn.Role, Content: sanitize(turn.Content)})
+	for _, message := range messages {
+		history = append(history, holmes.Message{Role: message.Role, Content: message.Content})
 	}
 	return history
 }

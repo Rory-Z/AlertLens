@@ -14,19 +14,12 @@ type Config struct {
 	AlertChannels        map[string]bool
 	AlertmanagerURL      *url.URL
 	HolmesURL            *url.URL
-	StatePath            string
-	ReplyLanguage        string
 	AlertmanagerTimeout  time.Duration
 	HolmesTimeout        time.Duration
 	HolmesMaxConcurrency int
 	EventQueueSize       int
-	EventDedupTTL        time.Duration
-	AlertSessionTTL      time.Duration
-	ResolvedSessionTTL   time.Duration
-	AdhocSessionTTL      time.Duration
 	AlertPayloadMaxBytes int
 	RunbookMaxBytes      int
-	ConversationMaxTurns int
 	ConversationMaxBytes int
 	SlackOutputMaxChars  int
 	MetricsAddr          string
@@ -58,8 +51,6 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 
-	cfg.StatePath = value(getenv, "STATE_PATH", "/var/lib/alertlens/state.json")
-	cfg.ReplyLanguage = value(getenv, "REPLY_LANGUAGE", "en")
 	if cfg.AlertmanagerTimeout, err = duration(getenv, "ALERTMANAGER_TIMEOUT", 5*time.Second); err != nil {
 		return Config{}, err
 	}
@@ -72,28 +63,13 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.EventQueueSize, err = positiveInt(getenv, "EVENT_QUEUE_SIZE", 100); err != nil {
 		return Config{}, err
 	}
-	if cfg.EventDedupTTL, err = duration(getenv, "EVENT_DEDUP_TTL", 10*time.Minute); err != nil {
-		return Config{}, err
-	}
-	if cfg.AlertSessionTTL, err = duration(getenv, "ALERT_SESSION_TTL", 24*time.Hour); err != nil {
-		return Config{}, err
-	}
-	if cfg.ResolvedSessionTTL, err = duration(getenv, "RESOLVED_SESSION_TTL", 24*time.Hour); err != nil {
-		return Config{}, err
-	}
-	if cfg.AdhocSessionTTL, err = duration(getenv, "ADHOC_SESSION_TTL", 8*time.Hour); err != nil {
-		return Config{}, err
-	}
 	if cfg.AlertPayloadMaxBytes, err = positiveInt(getenv, "ALERT_PAYLOAD_MAX_BYTES", 32768); err != nil {
 		return Config{}, err
 	}
 	if cfg.RunbookMaxBytes, err = positiveInt(getenv, "RUNBOOK_MAX_BYTES", 8192); err != nil {
 		return Config{}, err
 	}
-	if cfg.ConversationMaxTurns, err = positiveInt(getenv, "CONVERSATION_MAX_TURNS", 6); err != nil {
-		return Config{}, err
-	}
-	if cfg.ConversationMaxBytes, err = positiveInt(getenv, "CONVERSATION_MAX_BYTES", 16384); err != nil {
+	if cfg.ConversationMaxBytes, err = positiveInt(getenv, "CONVERSATION_MAX_BYTES", 256<<10); err != nil {
 		return Config{}, err
 	}
 	if cfg.SlackOutputMaxChars, err = positiveInt(getenv, "SLACK_OUTPUT_MAX_CHARS", 2500); err != nil {

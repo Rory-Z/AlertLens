@@ -16,12 +16,8 @@ type Metrics struct {
 	alertmanagerDuration prometheus.Histogram
 	holmesRequests       *prometheus.CounterVec
 	holmesDuration       prometheus.Histogram
-	persistenceErrors    prometheus.Counter
 	queueDepth           prometheus.Gauge
 	holmesActive         prometheus.Gauge
-	sessions             prometheus.Gauge
-	watchdogLastSeen     prometheus.Gauge
-	watchdogReceived     prometheus.Counter
 }
 
 func New() *Metrics {
@@ -45,31 +41,18 @@ func New() *Metrics {
 		holmesDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "alertlens_holmes_request_duration_seconds", Help: "Holmes request duration.",
 		}),
-		persistenceErrors: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "alertlens_persistence_errors_total", Help: "State persistence failures.",
-		}),
 		queueDepth: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "alertlens_queue_depth", Help: "Current queued work items.",
 		}),
 		holmesActive: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "alertlens_holmes_active", Help: "Current Holmes requests.",
 		}),
-		sessions: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "alertlens_sessions", Help: "Current persisted sessions.",
-		}),
-		watchdogLastSeen: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "alertlens_watchdog_last_seen_timestamp", Help: "Unix timestamp of the last Watchdog event.",
-		}),
-		watchdogReceived: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "alertlens_watchdog_received_total", Help: "Watchdog events received.",
-		}),
 	}
 	m.registry.MustRegister(
 		m.events, m.reactions,
 		m.alertmanagerRequests, m.alertmanagerDuration,
 		m.holmesRequests, m.holmesDuration,
-		m.persistenceErrors, m.queueDepth, m.holmesActive, m.sessions,
-		m.watchdogLastSeen, m.watchdogReceived,
+		m.queueDepth, m.holmesActive,
 	)
 	return m
 }
@@ -96,12 +79,5 @@ func (m *Metrics) Holmes(outcome string, duration time.Duration) {
 	m.holmesDuration.Observe(duration.Seconds())
 }
 
-func (m *Metrics) PersistenceError()          { m.persistenceErrors.Inc() }
 func (m *Metrics) QueueDepth(depth int)       { m.queueDepth.Set(float64(depth)) }
 func (m *Metrics) HolmesActive(delta float64) { m.holmesActive.Add(delta) }
-func (m *Metrics) Sessions(count int)         { m.sessions.Set(float64(count)) }
-
-func (m *Metrics) Watchdog(now time.Time) {
-	m.watchdogLastSeen.Set(float64(now.Unix()))
-	m.watchdogReceived.Inc()
-}

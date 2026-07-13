@@ -18,7 +18,6 @@ import (
 	"github.com/emqx/alertlens/internal/holmes"
 	"github.com/emqx/alertlens/internal/observability"
 	"github.com/emqx/alertlens/internal/service"
-	"github.com/emqx/alertlens/internal/session"
 	slackadapter "github.com/emqx/alertlens/internal/slack"
 )
 
@@ -36,28 +35,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	store, err := session.Open(cfg.StatePath, time.Now)
-	if err != nil {
-		return fmt.Errorf("open state: %w", err)
-	}
 	metrics := observability.New()
-	metrics.Sessions(len(store.Snapshot().Sessions))
 	slackClient := slackadapter.New(cfg.SlackBotToken, cfg.SlackAppToken, cfg.AlertChannels)
 	worker := service.New(
-		store,
 		alertmanager.New(cfg.AlertmanagerURL, cfg.AlertmanagerTimeout),
 		holmes.New(cfg.HolmesURL, cfg.HolmesTimeout),
 		slackClient,
 		service.Config{
 			QueueSize: cfg.EventQueueSize, Workers: cfg.HolmesMaxConcurrency,
-			EventDedupTTL:   cfg.EventDedupTTL,
-			AlertSessionTTL: cfg.AlertSessionTTL, ResolvedSessionTTL: cfg.ResolvedSessionTTL,
-			AdhocSessionTTL: cfg.AdhocSessionTTL, ConversationMaxTurns: cfg.ConversationMaxTurns,
 			AlertPayloadMaxBytes: cfg.AlertPayloadMaxBytes,
 			RunbookMaxBytes:      cfg.RunbookMaxBytes, ConversationMaxBytes: cfg.ConversationMaxBytes,
 			SlackOutputMaxChars: cfg.SlackOutputMaxChars,
 		},
-		time.Now,
 		metrics,
 	)
 
@@ -68,7 +57,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if ctx.Err() != nil {
 		return listener.Close()
 	}
-	return serve(ctx, listener, store.Ready, metrics.Handler(), slackClient, worker)
+	return serve(ctx, listener, metrics.Handler(), slackClient, worker)
 }
 
 type slackRunner interface {
@@ -81,13 +70,11 @@ type workerRunner interface {
 	Run(context.Context)
 }
 
-func serve(ctx context.Context, listener net.Listener, storeReady func() error, metricsHandler http.Handler, slackClient slackRunner, worker workerRunner) error {
+func serve(ctx context.Context, listener net.Listener, metricsHandler http.Handler, slackClient slackRunner, worker workerRunner) error {
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	srv := &http.Server{
-		Handler: health.New(func() error {
-			return ready(storeReady, slackClient.Ready)
-		}, metricsHandler),
+		Handler:           health.New(slackClient.Ready, metricsHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serverErr := make(chan error, 1)
@@ -136,13 +123,4 @@ func serve(ctx context.Context, listener net.Listener, storeReady func() error, 
 	}
 	<-serviceDone
 	return result
-}
-
-func ready(checks ...func() error) error {
-	for _, check := range checks {
-		if err := check(); err != nil {
-			return err
-		}
-	}
-	return nil
 }

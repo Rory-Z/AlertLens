@@ -25,7 +25,7 @@ type alertPayload struct {
 	Truncated bool                 `json:"truncated,omitempty"`
 }
 
-func buildRequest(event Event, identity marker.Alert, alerts []alertmanager.Alert, cfg Config) (holmes.Request, json.RawMessage) {
+func buildRequest(event Event, identity marker.Alert, alerts []alertmanager.Alert, cfg Config) holmes.Request {
 	safeIdentity := marker.Alert{Alertname: sanitize(identity.Alertname), Namespace: sanitize(identity.Namespace)}
 	safeAlerts := sanitizeAlerts(alerts)
 	alertJSON := boundAlerts(safeIdentity, safeAlerts, cfg.AlertPayloadMaxBytes)
@@ -36,13 +36,14 @@ func buildRequest(event Event, identity marker.Alert, alerts []alertmanager.Aler
 		"<untrusted_slack_message>\n" + slackText + "\n</untrusted_slack_message>\n" +
 		"Determine the likely root cause and give concise evidence-backed next checks."
 	key := identity.Key()
+	conversationID := threadLockKey(event.Channel, event.TS)
 	return holmes.Request{
 		Ask:                    ask,
 		AdditionalSystemPrompt: investigationSystemPrompt,
 		RequestSource:          "alert_investigation",
 		SourceRef:              key,
-		ConversationID:         key,
-	}, alertJSON
+		ConversationID:         conversationID,
+	}
 }
 
 func jsonString(text string) string {
@@ -70,46 +71,6 @@ func sanitizeMap(values map[string]string) map[string]string {
 		result[key] = sanitize(value)
 	}
 	return result
-}
-
-func sanitizeJSON(data json.RawMessage) json.RawMessage {
-	if len(data) == 0 {
-		return nil
-	}
-	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return json.RawMessage(`{}`)
-	}
-	value = sanitizeJSONValue(value)
-	result, err := json.Marshal(value)
-	if err != nil {
-		return json.RawMessage(`{}`)
-	}
-	return result
-}
-
-func boundAlertContext(data json.RawMessage, maxBytes int) json.RawMessage {
-	data = sanitizeJSON(data)
-	if maxBytes > 0 && len(data) > maxBytes {
-		return json.RawMessage(`{}`)
-	}
-	return data
-}
-
-func sanitizeJSONValue(value any) any {
-	switch typed := value.(type) {
-	case string:
-		return sanitize(typed)
-	case []any:
-		for index := range typed {
-			typed[index] = sanitizeJSONValue(typed[index])
-		}
-	case map[string]any:
-		for key := range typed {
-			typed[key] = sanitizeJSONValue(typed[key])
-		}
-	}
-	return value
 }
 
 func boundAlerts(identity marker.Alert, alerts []alertmanager.Alert, maxBytes int) json.RawMessage {

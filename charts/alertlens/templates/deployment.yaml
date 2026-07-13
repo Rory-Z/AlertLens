@@ -6,8 +6,6 @@ metadata:
     {{- include "alertlens.labels" . | nindent 4 }}
 spec:
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       {{- include "alertlens.selectorLabels" . | nindent 6 }}
@@ -56,8 +54,6 @@ spec:
               value: {{ required "alertmanagerURL is required" .Values.alertmanagerURL | quote }}
             - name: HOLMESGPT_URL
               value: {{ required "holmesURL is required" .Values.holmesURL | quote }}
-            - name: STATE_PATH
-              value: /var/lib/alertlens/state.json
             - name: METRICS_ADDR
               value: :9090
           ports:
@@ -74,10 +70,3 @@ spec:
               port: metrics
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          volumeMounts:
-            - name: state
-              mountPath: /var/lib/alertlens
-      volumes:
-        - name: state
-          persistentVolumeClaim:
-            claimName: {{ include "alertlens.fullname" . }}
