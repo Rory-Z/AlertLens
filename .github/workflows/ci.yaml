@@ -8,7 +8,8 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  static-checks:
+    name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -17,14 +18,33 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Verify Go
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Run go vet
+        run: go vet ./...
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-go@v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run tests
         run: |
-          test -z "$(gofmt -l .)"
-          go vet ./...
           go test -race -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out
           go tool cover -func=coverage.out | awk '/^total:/ { gsub("%", "", $3); if ($3 + 0 < 90) exit 1 }'
-          go build ./cmd/alertlens
+
+  helm:
+    name: Helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
       - uses: azure/setup-helm@v5.0.1
         with:
           version: v4.2.3
@@ -38,5 +58,12 @@ jobs:
             --set alertmanagerURL=http://alertmanager:9093 \
             --set holmesURL=http://holmes:5050
           helm unittest charts/alertlens
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
       - name: Build image
         run: docker build -t alertlens:test .

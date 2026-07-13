@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags: ['*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Verify chart version
+        shell: bash
+        run: |
+          chart_version=$(awk '$1 == "version:" { print $2; exit }' charts/alertlens/Chart.yaml)
+          test "$chart_version" = "${GITHUB_REF_NAME#v}"
+
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.3
+      - name: Package Helm chart
+        run: |
+          helm lint charts/alertlens \
+            --set slack.existingSecret=alertlens-slack \
+            --set-string 'slack.alertChannels[0]=C1' \
+            --set alertmanagerURL=http://alertmanager:9093 \
+            --set holmesURL=http://holmes:5050
+          mkdir dist
+          helm package charts/alertlens --destination dist
+
+      - name: Read image metadata
+        id: image
+        run: |
+          echo "name=$(awk '$1 == "repository:" { print $2; exit }' charts/alertlens/values.yaml)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(awk '$1 == "appVersion:" { gsub(/\"/, "", $2); print $2; exit }' charts/alertlens/Chart.yaml)" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v4.2.0
+      - name: Build and publish image
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          args=(--generate-notes --verify-tag)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            args+=(--prerelease --latest=false)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/*.tgz "${args[@]}"
