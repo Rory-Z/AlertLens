@@ -14,7 +14,7 @@ import (
 
 const (
 	defaultDrainTimeout            = 25 * time.Second
-	AlertmanagerFailureReplyPrefix = "⚠️ Alertmanager enrichment failed:"
+	AlertmanagerFailureReplyPrefix = "⚠️ Alertmanager verification failed:"
 	HolmesFailureReplyPrefix       = "⚠️ Holmes request failed:"
 )
 
@@ -177,20 +177,32 @@ func (s *Service) handle(ctx context.Context, item work) {
 	alerts, err := s.alertmanager.Active(ctx, item.identity.Alertname, item.identity.Namespace)
 	if err != nil {
 		s.metrics.Alertmanager("error", time.Since(started))
-		warning := AlertmanagerFailureReplyPrefix + " " + sanitize(err.Error()) +
-			"\nRCA will continue without the current alert snapshot."
-		_ = s.slack.Reply(ctx, item.event.Channel, item.event.TS,
-			truncateSlack(warning, s.config.SlackOutputMaxChars))
-		alerts = nil
-	} else {
-		s.metrics.Alertmanager("success", time.Since(started))
+		s.failVerification(ctx, item.event, sanitize(err.Error()))
+		return
 	}
+	if len(alerts) == 0 {
+		s.metrics.Alertmanager("no_match", time.Since(started))
+		s.failVerification(ctx, item.event, "no active alert matches Alert Identity")
+		return
+	}
+	s.metrics.Alertmanager("success", time.Since(started))
 
-	request := buildRequest(item.event, item.identity, alerts, s.config)
+	request, err := buildRequest(item.event, item.identity, alerts, s.config)
+	if err != nil {
+		s.failVerification(ctx, item.event, sanitize(err.Error()))
+		return
+	}
 	if !s.runHolmes(ctx, item.event, item.event.TS, request) {
 		return
 	}
 	s.metrics.Event("firing")
+}
+
+func (s *Service) failVerification(ctx context.Context, event Event, reason string) {
+	_ = s.slack.Reply(ctx, event.Channel, event.TS, truncateSlack(
+		AlertmanagerFailureReplyPrefix+" "+reason, s.config.SlackOutputMaxChars))
+	s.metrics.Event("failed")
+	s.transition(ctx, event, "eyes", "x")
 }
 
 func (s *Service) handleAsk(ctx context.Context, event Event) {

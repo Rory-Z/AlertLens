@@ -142,7 +142,9 @@ func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS 
 }
 
 func failureReply(text string) bool {
+	const legacyAlertmanagerFailureReplyPrefix = "⚠️ Alertmanager enrichment failed:"
 	return strings.HasPrefix(text, service.AlertmanagerFailureReplyPrefix) ||
+		strings.HasPrefix(text, legacyAlertmanagerFailureReplyPrefix) ||
 		strings.HasPrefix(text, service.HolmesFailureReplyPrefix)
 }
 

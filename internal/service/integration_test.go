@@ -17,6 +17,7 @@ import (
 
 	"github.com/emqx/alertlens/internal/alertmanager"
 	"github.com/emqx/alertlens/internal/holmes"
+	"github.com/emqx/alertlens/internal/observability"
 )
 
 func TestFiringAlert(t *testing.T) {
@@ -62,6 +63,8 @@ func TestFiringAlert(t *testing.T) {
 	if request.RequestSource != "alert_investigation" || request.SourceRef != "am:HighCPU:prod" ||
 		request.ConversationID != "slack:C1:100.1" ||
 		!strings.Contains(request.AdditionalSystemPrompt, "Respond in zh-CN.") ||
+		!strings.Contains(request.AdditionalSystemPrompt, "AlertLens verified") ||
+		!strings.Contains(request.Ask, `"verified":true`) ||
 		!strings.Contains(request.Ask, `"alertgroup":"one"`) || !strings.Contains(request.Ask, `"alertgroup":"two"`) {
 		t.Fatalf("Holmes request = %#v", request)
 	}
@@ -74,7 +77,7 @@ func TestEveryFiringNotificationRunsRCA(t *testing.T) {
 	var calls atomic.Int32
 	slack := &fakeSlack{}
 	service := startService(t, activeAlertmanager("A", "ns"), holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
-		if request.AdditionalSystemPrompt != investigationSystemPrompt {
+		if request.AdditionalSystemPrompt != investigationSystemPrompt+verifiedAlertPrompt {
 			t.Errorf("system prompt = %q", request.AdditionalSystemPrompt)
 		}
 		calls.Add(1)
@@ -92,25 +95,72 @@ func TestEveryFiringNotificationRunsRCA(t *testing.T) {
 	}
 }
 
-func TestAlertmanagerFailureRepliesAndContinuesRCA(t *testing.T) {
+func TestAlertmanagerFailureStopsBeforeHolmes(t *testing.T) {
 	var calls atomic.Int32
 	slack := &fakeSlack{}
 	service := startService(t,
 		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) {
 			return nil, errors.New("dial tcp: connection refused")
 		}),
-		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
 			calls.Add(1)
-			if !strings.Contains(request.Ask, `"alerts":[]`) {
-				t.Errorf("request = %#v", request)
-			}
 			return "answer", nil
 		}), slack, Config{})
 	service.Submit(context.Background(), firingEvent("1", "A", "ns"))
-	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:1") })
+	waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
 	replies := slack.replyLog()
-	if calls.Load() != 1 || len(replies) != 2 || !strings.Contains(replies[0], "dial tcp: connection refused") ||
-		strings.Contains(replies[0], "timeout") || replies[1] != "C1:1:answer" {
+	if calls.Load() != 0 || len(replies) != 1 || !strings.Contains(replies[0], "dial tcp: connection refused") ||
+		strings.Contains(replies[0], "timeout") {
+		t.Fatalf("calls = %d, replies = %#v", calls.Load(), replies)
+	}
+}
+
+func TestNoMatchingActiveAlertStopsBeforeHolmes(t *testing.T) {
+	var calls atomic.Int32
+	slack := &fakeSlack{}
+	metrics := observability.New()
+	service := New(
+		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) {
+			return nil, nil
+		}),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			calls.Add(1)
+			return "answer", nil
+		}), slack, Config{
+			QueueSize: 10, Workers: 1, AlertPayloadMaxBytes: 32768,
+			RunbookMaxBytes: 8192, ConversationMaxBytes: 256 << 10, SlackOutputMaxChars: 2500,
+		}, metrics)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	service.Submit(context.Background(), firingEvent("1", "A", "ns"))
+	waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
+	if replies := slack.replyLog(); calls.Load() != 0 || !slices.Equal(replies, []string{
+		"C1:1:" + AlertmanagerFailureReplyPrefix + " no active alert matches Alert Identity",
+	}) {
+		t.Fatalf("calls = %d, replies = %#v", calls.Load(), replies)
+	}
+	w := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(w.Body.String(), `alertlens_alertmanager_requests_total{outcome="no_match"} 1`) {
+		t.Fatalf("metrics = %q", w.Body.String())
+	}
+}
+
+func TestVerifiedSnapshotTooLargeStopsBeforeHolmes(t *testing.T) {
+	alertname := strings.Repeat("A", 100)
+	var calls atomic.Int32
+	slack := &fakeSlack{}
+	service := startService(t, activeAlertmanager(alertname, "ns"),
+		holmesFunc(func(context.Context, holmes.Request) (string, error) {
+			calls.Add(1)
+			return "answer", nil
+		}), slack, Config{AlertPayloadMaxBytes: 128})
+	service.Submit(context.Background(), firingEvent("1", alertname, "ns"))
+	waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
+	if replies := slack.replyLog(); calls.Load() != 0 || len(replies) != 1 ||
+		!strings.Contains(replies[0], "verified alert snapshot exceeds 128 bytes") {
 		t.Fatalf("calls = %d, replies = %#v", calls.Load(), replies)
 	}
 }

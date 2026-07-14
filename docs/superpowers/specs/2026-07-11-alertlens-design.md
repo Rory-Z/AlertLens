@@ -12,7 +12,7 @@ investigation without becoming part of alert delivery.
 ```text
 Alertmanager -> Slack       authoritative notification and trigger
 Slack -> AlertLens          event, thread anchor, and explicit questions
-AlertLens -> Alertmanager   best-effort current-alert enrichment for firing
+AlertLens -> Alertmanager   required active-alert verification for firing
 AlertLens -> HolmesGPT      read-only investigation
 AlertLens -> Slack          RCA, answers, failures, and reactions
 ```
@@ -28,8 +28,8 @@ The MVP includes:
 - A reaction-only resolved path.
 - Explicit top-level and thread `@AlertLens` questions.
 - Slack-derived conversation context for thread questions.
-- Current Alertmanager alerts and inline `annotations.runbook` enrichment for
-  automatic investigation.
+- Active Alertmanager verification, a bounded Verified Alert Snapshot, and
+  inline `annotations.runbook` context for automatic investigation.
 - Bounded prompts and replies, credential sanitization, health, readiness, and
   operational metrics.
 
@@ -64,12 +64,14 @@ identity. No placeholder such as `global` is introduced for an empty
 namespace.
 
 An Alertmanager Notification Group is a delivery grouping, not an Alert
-Identity. Several active groups can share one identity. For firing enrichment,
-AlertLens queries the current active alerts and includes every instance whose
-`alertname` and `namespace` match. This may combine instances from several
-notification groups. `group_by` fields are intentionally absent from the
-marker and query selector; the Slack root still shows which group triggered
-the current investigation.
+Identity. Several active groups can share one identity. For Active Alert
+Verification, AlertLens queries the current active alerts and requires at least
+one instance whose `alertname` and `namespace` match. Silenced and inhibited
+matches still count as active. The Verified Alert Snapshot includes every match
+that fits the payload budget and may combine instances from several notification
+groups; it always preserves `verified`, Alert Identity, and `truncated`.
+`group_by` fields are intentionally absent from the marker and query selector;
+the Slack root still shows which group triggered the current investigation.
 
 ## Automatic Investigation
 
@@ -78,17 +80,21 @@ Every notification with `status=firing` runs this flow:
 1. Add `eyes` to the notification.
 2. Serialize work for that Slack thread in-process.
 3. Query Alertmanager for all active instances matching Alert Identity.
-4. If the query fails, reply in the firing thread with the actual sanitized,
-   bounded error reason and continue with an empty current-alert payload.
-5. Build a bounded Holmes request from the notification root, matching alerts,
-   and inline runbooks.
-6. Replace `eyes` with `hourglass_flowing_sand` while Holmes runs.
-7. Post the bounded sanitized RCA in the notification thread.
-8. Replace the hourglass with `white_check_mark`, or with `x` on failure.
+4. If the query fails, reply with its actual sanitized, bounded reason, replace
+   `eyes` with `x`, and stop before Holmes.
+5. If the query succeeds with zero matches, reply with an explicit no-match
+   reason, record `no_match`, replace `eyes` with `x`, and stop without retry.
+6. Build a bounded Holmes request from the notification root, Verified Alert
+   Snapshot, and inline runbooks. State that verification succeeded immediately
+   before the request and the snapshot may be truncated.
+7. Replace `eyes` with `hourglass_flowing_sand` while Holmes runs.
+8. Post the bounded sanitized RCA in the notification thread.
+9. Replace the hourglass with `white_check_mark`, or with `x` on failure.
 
 No cooldown or stored episode suppresses repeated firing notifications. A rare
 Slack redelivery can therefore repeat work and replies. Automatic investigation
-does not read Slack thread history.
+does not read Slack thread history. Verification is point-in-time; a later
+resolution does not cancel an RCA already in progress.
 
 The Holmes metadata is:
 
@@ -137,11 +143,11 @@ history from Slack.
 
 ## Failure Replies and Reactions
 
-Alertmanager enrichment and Holmes failures are replied to in the relevant
-thread using the actual error returned by that operation after credential
-sanitization and Slack output bounding. Alertmanager failure is non-fatal to
-automatic investigation; Holmes failure is fatal and produces `x` for both Ask
-and automatic investigation.
+Active Alert Verification and Holmes failures are replied to in the relevant
+thread after credential sanitization and Slack output bounding. A query error
+uses its actual reason; a successful query with zero matches uses an explicit
+no-match reason. Both verification failures stop before Holmes and produce `x`;
+Holmes failure produces `x` for both Ask and automatic investigation.
 
 | Reaction | Meaning |
 | --- | --- |
@@ -177,7 +183,9 @@ shutdown for up to 25 seconds.
 
 - Alertmanager timeout: 5 seconds with at most three bounded retries.
 - Holmes timeout: 15 minutes without automatic retry.
-- Alert payload: 32 KiB.
+- Alert payload: 32 KiB, with a configurable minimum of 128 bytes. If the
+  verified identity cannot fit, the operation fails before Holmes rather than
+  dropping verification fields.
 - Inline runbooks: 8 KiB.
 - Conversation context: 256 KiB, with no turn limit.
 - Slack output: 2500 characters with a truncation notice.
@@ -201,17 +209,17 @@ The internal HTTP server exposes:
 - `/metrics`: Prometheus exposition.
 
 Metrics cover bounded event outcomes, queue depth, active Holmes calls,
-Alertmanager and Holmes latency/outcomes, and reaction outcomes. They do not
-include alert names, namespaces, channel IDs, thread IDs, event IDs, or URLs as
-labels.
+Alertmanager (`success`, `error`, `no_match`) and Holmes latency/outcomes, and
+reaction outcomes. They do not include alert names, namespaces, channel IDs,
+thread IDs, event IDs, or URLs as labels.
 
 ## Test Strategy
 
 The repository follows the testing trophy and integration-first TDD:
 
-- Service integration tests cover firing, resolved, Ask, best-effort
-  enrichment, real sanitized errors, reactions, queueing, shutdown, and thread
-  serialization.
+- Service integration tests cover firing, resolved, Ask, active-alert
+  verification, real sanitized errors, reactions, queueing, shutdown, and
+  thread serialization.
 - HTTP client tests cover Alertmanager and Holmes protocols.
 - Slack contract tests cover event translation, full cursor pagination,
   root/question/answer filtering, and Web API behavior.
@@ -225,10 +233,19 @@ The repository follows the testing trophy and integration-first TDD:
 
 ```gherkin
 Given a valid firing notification in a monitored channel
+And Alertmanager has a matching active alert
 When AlertLens receives it
 Then AlertLens runs Holmes once for that notification
-And Alertmanager enrichment failure does not prevent RCA
 And it posts either the RCA or a sanitized Holmes failure in that thread
+```
+
+```gherkin
+Given a valid firing notification in a monitored channel
+And Alertmanager cannot be queried or has no matching active alert
+When AlertLens receives it
+Then AlertLens posts the distinct bounded verification failure
+And marks the notification failed
+And does not call Holmes
 ```
 
 ```gherkin
