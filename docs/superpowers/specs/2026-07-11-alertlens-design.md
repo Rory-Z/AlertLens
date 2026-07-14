@@ -40,7 +40,7 @@ ingestion.
 
 ## Slack Boundary
 
-AlertLens only observes the channel configured in `SLACK_ALERT_CHANNEL`.
+AlertLens only observes the Monitored Channel configured by `SLACK_ALERT_CHANNEL`.
 Alertmanager bot messages are candidates for automatic handling. Human
 messages are handled only when Slack emits an explicit app mention event.
 Ordinary thread discussion is ignored.
