@@ -17,7 +17,6 @@ import (
 
 	"github.com/emqx/alertlens/internal/alertmanager"
 	"github.com/emqx/alertlens/internal/holmes"
-	"github.com/emqx/alertlens/internal/observability"
 )
 
 func TestFiringAlert(t *testing.T) {
@@ -118,22 +117,14 @@ func TestAlertmanagerFailureStopsBeforeHolmes(t *testing.T) {
 func TestNoMatchingActiveAlertStopsBeforeHolmes(t *testing.T) {
 	var calls atomic.Int32
 	slack := &fakeSlack{}
-	metrics := observability.New()
-	service := New(
+	service := startService(t,
 		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) {
 			return nil, nil
 		}),
 		holmesFunc(func(context.Context, holmes.Request) (string, error) {
 			calls.Add(1)
 			return "answer", nil
-		}), slack, Config{
-			QueueSize: 10, Workers: 1, AlertPayloadMaxBytes: 32768,
-			RunbookMaxBytes: 8192, ConversationMaxBytes: 256 << 10, SlackOutputMaxChars: 2500,
-		}, metrics)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { service.Run(ctx); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
+		}), slack, Config{})
 	service.Submit(context.Background(), firingEvent("1", "A", "ns"))
 	waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
 	if replies := slack.replyLog(); calls.Load() != 0 || !slices.Equal(replies, []string{
@@ -142,7 +133,7 @@ func TestNoMatchingActiveAlertStopsBeforeHolmes(t *testing.T) {
 		t.Fatalf("calls = %d, replies = %#v", calls.Load(), replies)
 	}
 	w := httptest.NewRecorder()
-	metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	service.metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(w.Body.String(), `alertlens_alertmanager_requests_total{outcome="no_match"} 1`) {
 		t.Fatalf("metrics = %q", w.Body.String())
 	}
