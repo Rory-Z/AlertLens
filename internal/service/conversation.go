@@ -36,12 +36,12 @@ func boundConversation(messages []ConversationMessage, maxBytes int) []Conversat
 	return result
 }
 
-func conversationHistory(messages []ConversationMessage) []holmes.Message {
+func conversationHistory(messages []ConversationMessage, prompt string) []holmes.Message {
 	if len(messages) == 0 {
 		return nil
 	}
 	history := make([]holmes.Message, 1, len(messages)+1)
-	history[0] = holmes.Message{Role: "system", Content: investigationSystemPrompt}
+	history[0] = holmes.Message{Role: "system", Content: prompt}
 	for _, message := range messages {
 		history = append(history, holmes.Message{Role: message.Role, Content: message.Content})
 	}

@@ -52,6 +52,10 @@ _Avoid_: Alert follow-up session, marker-specific Ask, Alertmanager-enriched Ask
 A thread reply containing the actual sanitized and length-bounded failure reason from an Alertmanager enrichment or Holmes request. A Holmes failure produces a Failure Reply for both Ask and Automatic Investigation and marks the operation with an `x` reaction.
 _Avoid_: Generic failure message, fixed timeout reason, reaction-only failure
 
+**Holmes Response Language**:
+The language policy for successful Holmes answers, expressed as `auto` or any non-empty language tag. `auto` is the default and leaves the language to Holmes. It does not govern AlertLens warnings, failure replies, or truncation notices.
+_Avoid_: AlertLens language, interface locale
+
 **Stateless Processing**:
 AlertLens reconstructs each operation from the current Slack event, current Slack Thread History when handling an Ask, and current Alertmanager data when handling firing. It has no state file, session store, lifecycle record, alert snapshot, thread mapping, or persisted Event Receipt. Transient queues, concurrency limits, and in-process locks are coordination rather than memory. Because event IDs are not persisted, a rare Slack redelivery may produce duplicate work or replies.
 _Avoid_: Persistent memory, receipt-only state, restart continuity

@@ -91,6 +91,11 @@ Ask never queries Alertmanager. Holmes may query current systems through its
 own configured read-only tools. If Slack history cannot be read, AlertLens
 marks the Ask failed without calling Holmes.
 
+Automatic Investigation and Ask use the same configured Holmes Response
+Language. Its default, `auto`, leaves language selection to Holmes; any other
+value adds a system-level response-language directive. AlertLens warnings and
+failure replies remain unchanged.
+
 ## Noise and Failure Policy
 
 The reaction sequence makes state visible without extra channel messages:
