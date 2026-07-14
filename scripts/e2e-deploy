@@ -49,7 +49,7 @@ case "$1" in
       --set-string image.tag="$tag" \
       --set image.pullPolicy=Always \
       --set-string slack.existingSecret="$E2E_SLACK_SECRET" \
-      --set-string "slack.alertChannels[0]=$E2E_SLACK_CHANNEL" \
+      --set-string "slack.alertChannel=$E2E_SLACK_CHANNEL" \
       --set-string alertmanagerURL="$E2E_ALERTMANAGER_URL" \
       --set-string holmesURL="$E2E_HOLMES_URL" \
       --set-string holmesResponseLanguage=zh-CN \

@@ -36,7 +36,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	metrics := observability.New()
-	slackClient := slackadapter.New(cfg.SlackBotToken, cfg.SlackAppToken, cfg.AlertChannels)
+	slackClient := slackadapter.New(cfg.SlackBotToken, cfg.SlackAppToken, cfg.MonitoredChannel)
 	worker := service.New(
 		alertmanager.New(cfg.AlertmanagerURL, cfg.AlertmanagerTimeout),
 		holmes.New(cfg.HolmesURL, cfg.HolmesTimeout),

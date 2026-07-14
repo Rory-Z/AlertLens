@@ -28,7 +28,7 @@ jobs:
         run: |
           helm lint charts/alertlens \
             --set slack.existingSecret=alertlens-slack \
-            --set-string 'slack.alertChannels[0]=C1' \
+            --set-string slack.alertChannel=C1 \
             --set alertmanagerURL=http://alertmanager:9093 \
             --set holmesURL=http://holmes:5050
           helm unittest charts/alertlens

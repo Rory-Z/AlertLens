@@ -129,12 +129,12 @@ func waitHTTPStatus(t *testing.T, target string, want int) {
 func validEnv(t *testing.T) map[string]string {
 	t.Helper()
 	return map[string]string{
-		"SLACK_BOT_TOKEN":      "xoxb-test",
-		"SLACK_APP_TOKEN":      "xapp-test",
-		"SLACK_ALERT_CHANNELS": "C1",
-		"ALERTMANAGER_URL":     "http://alertmanager:9093",
-		"HOLMESGPT_URL":        "http://holmes:5050",
-		"METRICS_ADDR":         "127.0.0.1:0",
+		"SLACK_BOT_TOKEN":     "xoxb-test",
+		"SLACK_APP_TOKEN":     "xapp-test",
+		"SLACK_ALERT_CHANNEL": "C1",
+		"ALERTMANAGER_URL":    "http://alertmanager:9093",
+		"HOLMESGPT_URL":       "http://holmes:5050",
+		"METRICS_ADDR":        "127.0.0.1:0",
 	}
 }
 

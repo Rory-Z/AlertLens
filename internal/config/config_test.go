@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+func TestLoadAcceptsSingleMonitoredChannel(t *testing.T) {
+	env := validEnv()
+	env["SLACK_ALERT_CHANNEL"] = " C1 "
+
+	cfg, err := Load(mapEnv(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MonitoredChannel != "C1" {
+		t.Fatalf("channel = %q", cfg.MonitoredChannel)
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
 	cfg, err := Load(mapEnv(validEnv()))
 	if err != nil {
@@ -25,8 +38,8 @@ func TestLoadDefaults(t *testing.T) {
 		cfg.HolmesResponseLanguage != "auto" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
-	if !cfg.AlertChannels["C1"] || !cfg.AlertChannels["C2"] || len(cfg.AlertChannels) != 2 {
-		t.Fatalf("channels = %#v", cfg.AlertChannels)
+	if cfg.MonitoredChannel != "C1" {
+		t.Fatalf("channel = %q", cfg.MonitoredChannel)
 	}
 	if cfg.AlertmanagerURL.String() != "http://alertmanager:9093" || cfg.HolmesURL.String() != "http://holmes:5050" {
 		t.Fatalf("URLs = %s, %s", cfg.AlertmanagerURL, cfg.HolmesURL)
@@ -70,7 +83,10 @@ func TestLoadRejectsInvalidValuesWithoutLeakingSecrets(t *testing.T) {
 		{name: "missing app token", key: "SLACK_APP_TOKEN"},
 		{name: "missing required value", key: "HOLMESGPT_URL"},
 		{name: "missing Alertmanager URL", key: "ALERTMANAGER_URL"},
-		{name: "empty channel list", key: "SLACK_ALERT_CHANNELS", value: " , "},
+		{name: "empty channel", key: "SLACK_ALERT_CHANNEL", value: " "},
+		{name: "multiple channels", key: "SLACK_ALERT_CHANNEL", value: "C1,C2"},
+		{name: "space separated channels", key: "SLACK_ALERT_CHANNEL", value: "C1 C2"},
+		{name: "Helm list", key: "SLACK_ALERT_CHANNEL", value: "[C1 C2]"},
 		{name: "invalid URL", key: "ALERTMANAGER_URL", value: "://bad"},
 		{name: "URL scheme", key: "ALERTMANAGER_URL", value: "ftp://alertmanager"},
 		{name: "Holmes URL", key: "HOLMESGPT_URL", value: "://bad"},
@@ -118,11 +134,11 @@ func TestLoadRejectsWrongSlackTokenTypes(t *testing.T) {
 
 func validEnv() map[string]string {
 	return map[string]string{
-		"SLACK_BOT_TOKEN":      "xoxb-test",
-		"SLACK_APP_TOKEN":      "xapp-test",
-		"SLACK_ALERT_CHANNELS": "C1, C2,C1",
-		"ALERTMANAGER_URL":     "http://alertmanager:9093",
-		"HOLMESGPT_URL":        "http://holmes:5050",
+		"SLACK_BOT_TOKEN":     "xoxb-test",
+		"SLACK_APP_TOKEN":     "xapp-test",
+		"SLACK_ALERT_CHANNEL": "C1",
+		"ALERTMANAGER_URL":    "http://alertmanager:9093",
+		"HOLMESGPT_URL":       "http://holmes:5050",
 	}
 }
 

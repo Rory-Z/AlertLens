@@ -5,8 +5,7 @@ tests:
   - it: renders one hardened stateless replica
     set:
       slack.existingSecret: alertlens-slack
-      slack.alertChannels:
-        - C1
+      slack.alertChannel: C1
       alertmanagerURL: http://alertmanager:9093
       holmesURL: http://holmes:5050
       holmesResponseLanguage: zh-CN
@@ -29,6 +28,11 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
       - notExists:
           path: spec.template.spec.volumes
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SLACK_ALERT_CHANNEL
+            value: C1
       - contains:
           path: spec.template.spec.containers[0].env
           content:

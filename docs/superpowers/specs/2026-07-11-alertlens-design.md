@@ -23,7 +23,7 @@ If AlertLens is unavailable, Alertmanager still notifies Slack.
 
 The MVP includes:
 
-- Slack Socket Mode ingestion in configured `SLACK_ALERT_CHANNELS`.
+- Slack Socket Mode ingestion in the configured `SLACK_ALERT_CHANNEL`.
 - Automatic investigation for every valid firing notification.
 - A reaction-only resolved path.
 - Explicit top-level and thread `@AlertLens` questions.
@@ -40,7 +40,7 @@ ingestion.
 
 ## Slack Boundary
 
-AlertLens only observes channels listed in `SLACK_ALERT_CHANNELS`.
+AlertLens only observes the Monitored Channel configured by `SLACK_ALERT_CHANNEL`.
 Alertmanager bot messages are candidates for automatic handling. Human
 messages are handled only when Slack emits an explicit app mention event.
 Ordinary thread discussion is ignored.

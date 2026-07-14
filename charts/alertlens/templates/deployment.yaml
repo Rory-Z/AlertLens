@@ -48,8 +48,8 @@ spec:
                 secretKeyRef:
                   name: {{ required "slack.existingSecret is required" .Values.slack.existingSecret }}
                   key: app-token
-            - name: SLACK_ALERT_CHANNELS
-              value: {{ required "slack.alertChannels is required" (join "," .Values.slack.alertChannels) | quote }}
+            - name: SLACK_ALERT_CHANNEL
+              value: {{ required "slack.alertChannel is required" .Values.slack.alertChannel | quote }}
             - name: ALERTMANAGER_URL
               value: {{ required "alertmanagerURL is required" .Values.alertmanagerURL | quote }}
             - name: HOLMESGPT_URL
