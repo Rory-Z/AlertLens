@@ -42,7 +42,7 @@ func TestFiringAlert(t *testing.T) {
 	slack := &fakeSlack{}
 	service := startService(t,
 		alertmanager.New(testURL(t, alertmanagerServer.URL), time.Second),
-		holmes.New(testURL(t, holmesServer.URL), time.Second), slack, Config{ResponseLanguage: "zh-CN"})
+		holmes.New(testURL(t, holmesServer.URL), time.Second), slack, Config{HolmesResponseLanguage: "zh-CN"})
 	event := Event{Channel: "C1", Text: "FIRING HighCPU\n<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->", TS: "100.1"}
 	if !service.Submit(context.Background(), event) {
 		t.Fatal("event was not accepted")
@@ -79,7 +79,7 @@ func TestEveryFiringNotificationRunsRCA(t *testing.T) {
 		}
 		calls.Add(1)
 		return "answer", nil
-	}), slack, Config{ResponseLanguage: "auto"})
+	}), slack, Config{HolmesResponseLanguage: "auto"})
 	for _, ts := range []string{"1", "2"} {
 		if !service.Submit(context.Background(), Event{Channel: "C1", TS: ts,
 			Text: `<!-- alertlens:alertname=A,namespace=ns,status=firing -->`}) {
@@ -193,7 +193,7 @@ func TestAskReconstructsAndBoundsSlackConversationWithoutAlertmanager(t *testing
 		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
 			requestCh <- request
 			return "answer", nil
-		}), slack, Config{ConversationMaxBytes: 10, ResponseLanguage: "zh-CN"})
+		}), slack, Config{ConversationMaxBytes: 10, HolmesResponseLanguage: "zh-CN"})
 	event := Event{Channel: "C1", ThreadTS: "1", TS: "6", Text: "reply in English", Mention: true}
 	if !service.Submit(context.Background(), event) {
 		t.Fatal("Ask was rejected")

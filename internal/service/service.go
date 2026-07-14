@@ -42,13 +42,13 @@ type Slack interface {
 }
 
 type Config struct {
-	QueueSize            int
-	Workers              int
-	AlertPayloadMaxBytes int
-	RunbookMaxBytes      int
-	ConversationMaxBytes int
-	SlackOutputMaxChars  int
-	ResponseLanguage     string
+	QueueSize              int
+	Workers                int
+	AlertPayloadMaxBytes   int
+	RunbookMaxBytes        int
+	ConversationMaxBytes   int
+	SlackOutputMaxChars    int
+	HolmesResponseLanguage string
 }
 
 type work struct {
@@ -215,7 +215,7 @@ func (s *Service) handleAsk(ctx context.Context, event Event) {
 
 	question := truncateBytes(sanitize(event.Text), s.config.ConversationMaxBytes)
 	key := threadLockKey(event.Channel, parentTS)
-	prompt := investigationPrompt(s.config.ResponseLanguage)
+	prompt := holmesSystemPrompt(s.config.HolmesResponseLanguage)
 	request := holmes.Request{
 		Ask:                    "<untrusted_user_question>\n" + jsonString(question) + "\n</untrusted_user_question>",
 		ConversationHistory:    conversationHistory(messages, prompt),

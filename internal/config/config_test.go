@@ -22,7 +22,7 @@ func TestLoadDefaults(t *testing.T) {
 		cfg.ConversationMaxBytes != 256<<10 ||
 		cfg.SlackOutputMaxChars != 2500 ||
 		cfg.MetricsAddr != ":9090" ||
-		cfg.ResponseLanguage != "auto" {
+		cfg.HolmesResponseLanguage != "auto" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 	if !cfg.AlertChannels["C1"] || !cfg.AlertChannels["C2"] || len(cfg.AlertChannels) != 2 {
@@ -55,7 +55,7 @@ func TestLoadOverrides(t *testing.T) {
 		cfg.AlertPayloadMaxBytes != 1000 || cfg.RunbookMaxBytes != 2000 ||
 		cfg.ConversationMaxBytes != 4000 ||
 		cfg.SlackOutputMaxChars != 500 || cfg.MetricsAddr != "127.0.0.1:0" ||
-		cfg.ResponseLanguage != "zh-CN" {
+		cfg.HolmesResponseLanguage != "zh-CN" {
 		t.Fatalf("unexpected overrides: %+v", cfg)
 	}
 }
