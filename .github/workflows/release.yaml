@@ -9,6 +9,7 @@ concurrency:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -21,7 +22,7 @@ jobs:
       - name: Verify chart version
         run: |
           chart_version=$(awk '$1 == "version:" { print $2; exit }' charts/alertlens/Chart.yaml)
-          test "$chart_version" = "${GITHUB_REF_NAME#v}"
+          test "v$chart_version" = "$GITHUB_REF_NAME"
 
       - uses: azure/setup-helm@v5.0.1
         with:
@@ -30,6 +31,14 @@ jobs:
         run: |
           mkdir dist
           helm package charts/alertlens --destination dist
+
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish Helm chart
+        run: helm push dist/*.tgz oci://ghcr.io/rory-z/charts
 
       - name: Create GitHub release
         env:

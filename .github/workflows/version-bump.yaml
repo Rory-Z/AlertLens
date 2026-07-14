@@ -7,10 +7,6 @@ on:
         description: Chart version to release (for example, 0.2.0 or 1.0.0-rc.1)
         required: true
         type: string
-      app_version:
-        description: AlertLens app version; leave empty to use the chart version
-        required: false
-        type: string
       create_tag:
         description: Create a tag and start the Docker and release workflows
         required: true
@@ -28,36 +24,31 @@ jobs:
     timeout-minutes: 10
     env:
       VERSION: ${{ inputs.version }}
-      APP_VERSION: ${{ inputs.app_version }}
     steps:
       - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
 
-      - name: Validate versions
+      - name: Validate version
         run: |
-          pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
-          if [[ ! "$VERSION" =~ $pattern ]]; then
+          pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$VERSION" =~ $pattern || ( "$VERSION" == *-* && ".${VERSION#*-}." =~ \.0[0-9]+\. ) ]]; then
             echo "Invalid version: $VERSION" >&2
-            exit 1
-          fi
-          if [[ -n "$APP_VERSION" && ! "$APP_VERSION" =~ $pattern ]]; then
-            echo "Invalid app version: $APP_VERSION" >&2
             exit 1
           fi
 
       - name: Check tag
         if: ${{ inputs.create_tag }}
         run: |
-          if git rev-parse --verify --quiet "refs/tags/$VERSION"; then
-            echo "Tag $VERSION already exists" >&2
+          if git rev-parse --verify --quiet "refs/tags/v$VERSION"; then
+            echo "Tag v$VERSION already exists" >&2
             exit 1
           fi
 
       - name: Update chart
         run: |
           sed -i -E "s/^version:.*/version: $VERSION/" charts/alertlens/Chart.yaml
-          sed -i -E "s/^appVersion:.*/appVersion: \"${APP_VERSION:-$VERSION}\"/" charts/alertlens/Chart.yaml
+          sed -i -E "s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/alertlens/Chart.yaml
           cat charts/alertlens/Chart.yaml
 
       - name: Commit version bump
@@ -73,11 +64,11 @@ jobs:
       - name: Create tag
         if: ${{ inputs.create_tag }}
         run: |
-          git tag -a "$VERSION" -m "Release $VERSION"
-          git push origin "$VERSION"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
 
       - name: Start Docker publish
         if: ${{ inputs.create_tag }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run docker.yml --ref "$VERSION"
+        run: gh workflow run docker.yml --ref "v$VERSION"
