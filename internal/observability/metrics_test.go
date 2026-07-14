@@ -14,11 +14,8 @@ func TestMetricsExposeBoundedLabels(t *testing.T) {
 	metrics.Reaction("add", "success")
 	metrics.Alertmanager("success", time.Second)
 	metrics.Holmes("error", 2*time.Second)
-	metrics.PersistenceError()
 	metrics.QueueDepth(2)
 	metrics.HolmesActive(1)
-	metrics.Sessions(3)
-	metrics.Watchdog(time.Unix(123, 0))
 
 	families, err := metrics.registry.Gather()
 	if err != nil {
@@ -31,14 +28,15 @@ func TestMetricsExposeBoundedLabels(t *testing.T) {
 		"alertlens_alertmanager_request_duration_seconds": false,
 		"alertlens_holmes_requests_total":                 false,
 		"alertlens_holmes_request_duration_seconds":       false,
-		"alertlens_persistence_errors_total":              false,
 		"alertlens_queue_depth":                           false,
 		"alertlens_holmes_active":                         false,
-		"alertlens_sessions":                              false,
-		"alertlens_watchdog_last_seen_timestamp":          false,
-		"alertlens_watchdog_received_total":               false,
 	}
 	for _, family := range families {
+		for _, removed := range []string{"persistence", "sessions", "watchdog"} {
+			if strings.Contains(family.GetName(), removed) {
+				t.Fatalf("removed metric %s is still registered", family.GetName())
+			}
+		}
 		if _, ok := want[family.GetName()]; ok {
 			want[family.GetName()] = true
 		}

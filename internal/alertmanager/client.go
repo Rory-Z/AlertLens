@@ -58,8 +58,6 @@ func (c *Client) activeOnce(ctx context.Context, alertname, namespace string) ([
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/v2/alerts"
 	query := endpoint.Query()
 	query.Set("active", "true")
-	query.Set("silenced", "false")
-	query.Set("inhibited", "false")
 	endpoint.RawQuery = query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)

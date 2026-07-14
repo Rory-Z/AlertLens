@@ -8,15 +8,15 @@ The firing, resolved, ad-hoc, and thread follow-up paths are implemented. See th
 
 Current alert behavior:
 
-- marked Slack notifications are confirmed against Alertmanager before processing
-- firing alerts receive one HolmesGPT RCA per active session
-- confirmed resolution replies in the original thread and adds `large_green_circle`
-- Slack event-ID deduplication and thread/session state survive a single-replica restart
-- Watchdog updates metrics without invoking HolmesGPT
-- a top-level `@AlertLens` creates an ad-hoc thread
-- an explicit mention in a known alert thread reuses its alert and conversation context
-- an explicit mention in an unknown thread creates ad-hoc context on that thread
+- marked Slack notifications must include `alertname`, `namespace`, and `status=firing|resolved`
+- every firing notification runs one RCA; Alertmanager enrichment is best-effort
+- a resolved notification only receives `large_green_circle`; it does not update an older thread
+- Watchdog is handled like any other firing alert
+- a top-level `@AlertLens` asks HolmesGPT and creates a reply thread
+- a thread `@AlertLens` rebuilds context from the root, prior explicit questions, and AlertLens answers
+- Ask never queries Alertmanager; HolmesGPT can use its own configured tools when needed
 - human messages without an explicit mention are ignored
+- AlertLens keeps no session, receipt, lifecycle, or conversation state on disk
 
 ## Slack app
 
@@ -56,22 +56,18 @@ SLACK_APP_TOKEN=xapp-test \
 SLACK_ALERT_CHANNELS=C1 \
 ALERTMANAGER_URL=http://alertmanager:9093 \
 HOLMESGPT_URL=http://holmes:5050 \
-STATE_PATH=/tmp/alertlens-state.json \
 go run ./cmd/alertlens
 ```
 
-The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default.
+The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default. Thread context is capped by `CONVERSATION_MAX_BYTES`, which defaults to 256 KiB; there is no turn-count limit.
 
 ## Deployment
 
-Create a dedicated Secret whose keys are `bot-token` and `app-token`; do not put either token in Helm values. The chart requires an RWO PVC. If the cluster has no default StorageClass, set `state.storageClass` explicitly (the FlowMQ dev cluster uses `gp3`).
+Create a dedicated Secret whose keys are `bot-token` and `app-token`; do not put either token in Helm values. AlertLens is stateless and the chart does not create a PVC.
 
 The default NetworkPolicy permits DNS and any destination on TCP 443; native Kubernetes NetworkPolicy cannot enforce Slack FQDNs. Use a CNI FQDN policy or egress proxy when strict Slack-only HTTPS is required. Add the namespaces and ports used by HolmesGPT and Alertmanager:
 
 ```yaml
-state:
-  storageClass: gp3
-
 networkPolicy:
   internalEgress:
     - namespace: victoria
@@ -109,7 +105,6 @@ The defaults are:
 | `E2E_RELEASE` | `alertlens-e2e` |
 | `E2E_SLACK_SECRET` | `alertlens-e2e-slack` |
 | `E2E_SLACK_CHANNEL` | `C099FMSGNEQ` |
-| `E2E_STORAGE_CLASS` | `gp3` |
 | `E2E_ALERTMANAGER_NAMESPACE` | `victoria` |
 | `E2E_ALERTMANAGER_SERVICE` | `vmalertmanager-victoria-metrics-k8s-stack` |
 | `E2E_ALERTMANAGER_URL` | `http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093` |
@@ -147,20 +142,14 @@ port-forwards Alertmanager to the local test process.
 The test injects a clearly labelled synthetic alert, waits for the RCA, and
 prints an `ACTION REQUIRED` prompt with a direct Slack thread link. Mention
 AlertLens in that thread and include the supplied run ID. The runner detects
-the follow-up automatically, resolves the alert, and verifies the final thread
-reply and reactions. The alert is resolved on normal failure paths; its
+the follow-up automatically, resolves the alert, and verifies that the new
+resolved notification receives `large_green_circle` without requiring an
+update to the older firing thread. The alert is resolved on normal failure paths; its
 one-hour `endsAt` is only a fallback for a forcibly terminated runner. This
 interactive test is not run in CI. The runner allows up to 20 minutes for each
 complete AlertLens response (including its 15-minute HolmesGPT call limit), 10
 minutes for the human step, 7 minutes for resolution, and 60 minutes for the
 overall test process.
-
-Alert on a missing Watchdog without depending on AlertLens to evaluate the condition:
-
-```promql
-absent(alertlens_watchdog_last_seen_timestamp)
-or time() - alertlens_watchdog_last_seen_timestamp > 300
-```
 
 ## Verification
 

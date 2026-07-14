@@ -14,10 +14,6 @@ slack:
 alertmanagerURL: ""
 holmesURL: ""
 
-state:
-  storageClass: ""
-  size: 1Gi
-
 service:
   port: 9090
 

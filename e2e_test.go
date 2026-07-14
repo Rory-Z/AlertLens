@@ -44,12 +44,6 @@ type threadState struct {
 	reply  slackapi.Message
 }
 
-type resolvedState struct {
-	original slackapi.Message
-	resolved slackapi.Message
-	replied  bool
-}
-
 func TestE2E(t *testing.T) {
 	if os.Getenv("ALERTLENS_E2E") != "1" {
 		t.Skip("run with make e2e-test")
@@ -168,52 +162,20 @@ func TestE2E(t *testing.T) {
 	}
 	resolved = true
 
-	completeOnPreviousPoll := false
-	final := waitFor(t, "AlertLens resolution", resolveTimeout, func(ctx context.Context) (resolvedState, bool, error) {
+	final := waitFor(t, "AlertLens resolution", resolveTimeout, func(ctx context.Context) (slackapi.Message, bool, error) {
 		history, err := channelHistory(ctx, slack, channel, slackTimestamp(resolveStarted.Add(-time.Second)))
 		if err != nil {
-			return resolvedState{}, false, err
+			return slackapi.Message{}, false, err
 		}
-		var resolvedParent slackapi.Message
 		for _, message := range history {
 			if message.Timestamp != parent.Timestamp && strings.Contains(messageContent(message), runID) {
-				resolvedParent = message
-				break
+				done := reactedBy(message, "large_green_circle", bot) || reactedBy(message, "x", bot)
+				return message, done, nil
 			}
 		}
-		if resolvedParent.Timestamp == "" {
-			return resolvedState{}, false, nil
-		}
-		replies, err := threadReplies(ctx, slack, channel, parent.Timestamp)
-		if err != nil {
-			return resolvedState{}, false, err
-		}
-		state := resolvedState{
-			original: messageAt(replies, parent.Timestamp), resolved: resolvedParent,
-		}
-		for _, message := range replies {
-			if isBotMessage(message, bot) && strings.Contains(message.Text, "Alertmanager confirms this alert is resolved.") {
-				state.replied = true
-				break
-			}
-		}
-		failed := reactedBy(state.resolved, "x", bot)
-		done := state.replied && reactedBy(state.original, "large_green_circle", bot) &&
-			reactedBy(state.resolved, "large_green_circle", bot)
-		if failed {
-			return state, true, nil
-		}
-		if !done {
-			completeOnPreviousPoll = false
-			return state, false, nil
-		}
-		if completeOnPreviousPoll {
-			return state, true, nil
-		}
-		completeOnPreviousPoll = true
-		return state, false, nil
+		return slackapi.Message{}, false, nil
 	})
-	if reactedBy(final.resolved, "x", bot) {
+	if reactedBy(final, "x", bot) {
 		t.Fatal("AlertLens marked the resolved alert as failed")
 	}
 	t.Logf("E2E passed: %s", permalink)

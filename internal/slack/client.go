@@ -32,6 +32,7 @@ type Client struct {
 	socket    socketConnection
 	channels  map[string]bool
 	botUserID string
+	botID     string
 	connected atomic.Bool
 }
 
@@ -48,6 +49,7 @@ func (c *Client) Run(ctx context.Context, handler func(context.Context, service.
 		return fmt.Errorf("Slack auth.test: %w", err)
 	}
 	c.botUserID = auth.UserID
+	c.botID = auth.BotID
 
 	runCtx, cancel := context.WithCancel(ctx)
 	eventsDone := make(chan struct{})
@@ -96,6 +98,65 @@ func (c *Client) Reply(ctx context.Context, channel, threadTS, text string) erro
 	})
 }
 
+func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS string) ([]service.ConversationMessage, error) {
+	var all []slackapi.Message
+	cursor := ""
+	for {
+		var messages []slackapi.Message
+		var hasMore bool
+		var next string
+		err := retryRateLimit(ctx, func() error {
+			var err error
+			messages, hasMore, next, err = c.api.GetConversationRepliesContext(ctx, &slackapi.GetConversationRepliesParameters{
+				ChannelID: channel, Timestamp: threadTS, Latest: currentTS, Limit: 200, Cursor: cursor,
+			})
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, messages...)
+		if !hasMore || next == "" {
+			break
+		}
+		cursor = next
+	}
+	result := make([]service.ConversationMessage, 0, len(all))
+	for _, message := range all {
+		if message.Timestamp == currentTS {
+			continue
+		}
+		text := messageText(message)
+		switch {
+		case message.Timestamp == threadTS:
+			result = append(result, service.ConversationMessage{Role: "user", Content: text})
+		case (message.User == c.botUserID || (c.botID != "" && message.BotID == c.botID)) && !failureReply(text):
+			result = append(result, service.ConversationMessage{Role: "assistant", Content: text})
+		case strings.Contains(text, "<@"+c.botUserID+">"):
+			result = append(result, service.ConversationMessage{
+				Role: "user", Content: strings.TrimSpace(strings.ReplaceAll(text, "<@"+c.botUserID+">", "")),
+			})
+		}
+	}
+	return result, nil
+}
+
+func failureReply(text string) bool {
+	return strings.HasPrefix(text, service.AlertmanagerFailureReplyPrefix) ||
+		strings.HasPrefix(text, service.HolmesFailureReplyPrefix)
+}
+
+func messageText(message slackapi.Message) string {
+	parts := []string{message.Text}
+	for _, attachment := range message.Attachments {
+		parts = append(parts, attachment.Fallback, attachment.Pretext, attachment.Title, attachment.Text)
+		for _, field := range attachment.Fields {
+			parts = append(parts, field.Title, field.Value)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
 func (c *Client) consume(ctx context.Context, handler func(context.Context, service.Event) bool) {
 	for {
 		select {
@@ -127,7 +188,7 @@ func (c *Client) consume(ctx context.Context, handler func(context.Context, serv
 func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
 	switch inner := event.InnerEvent.Data.(type) {
 	case *slackevents.MessageEvent:
-		return translateMessage(eventID(event), inner, channels, botUserID)
+		return translateMessage(inner, channels, botUserID)
 	case *slackevents.AppMentionEvent:
 		if !channels[inner.Channel] || inner.User == botUserID || inner.TimeStamp == "" {
 			return service.Event{}, false
@@ -146,8 +207,8 @@ func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUs
 			return service.Event{}, false
 		}
 		return service.Event{
-			ID: eventID(event), Channel: inner.Channel, User: inner.User, BotID: inner.BotID,
-			Text: strings.Join(parts, "\n"), TS: inner.TimeStamp, ThreadTS: inner.ThreadTimeStamp,
+			Channel: inner.Channel,
+			Text:    strings.Join(parts, "\n"), TS: inner.TimeStamp, ThreadTS: inner.ThreadTimeStamp,
 			Mention: true,
 		}, true
 	default:
@@ -155,7 +216,7 @@ func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUs
 	}
 }
 
-func translateMessage(eventID string, message *slackevents.MessageEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
+func translateMessage(message *slackevents.MessageEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
 	if (message.SubType != "" && message.SubType != "bot_message") ||
 		message.BotID == "" || !channels[message.Channel] || message.User == botUserID || message.TimeStamp == "" {
 		return service.Event{}, false
@@ -177,19 +238,9 @@ func translateMessage(eventID string, message *slackevents.MessageEvent, channel
 		return service.Event{}, false
 	}
 	return service.Event{
-		ID: eventID, Channel: message.Channel, User: message.User, BotID: message.BotID,
-		Text: strings.Join(parts, "\n"), TS: message.TimeStamp, ThreadTS: message.ThreadTimeStamp,
+		Channel: message.Channel,
+		Text:    strings.Join(parts, "\n"), TS: message.TimeStamp, ThreadTS: message.ThreadTimeStamp,
 	}, true
-}
-
-func eventID(event slackevents.EventsAPIEvent) string {
-	switch outer := event.Data.(type) {
-	case *slackevents.EventsAPICallbackEvent:
-		return outer.EventID
-	case slackevents.EventsAPICallbackEvent:
-		return outer.EventID
-	}
-	return ""
 }
 
 func ignoreSlackError(err error, allowed string) error {

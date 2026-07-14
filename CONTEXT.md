@@ -7,3 +7,51 @@ AlertLens enriches authoritative Alertmanager notifications with investigation c
 **Synthetic Alert**:
 An intentionally injected Alertmanager alert that follows normal alert routing but does not represent a real incident.
 _Avoid_: Fake alert, test event
+
+**Monitored Channel**:
+A Slack channel explicitly configured for AlertLens. Automatic alert handling and explicit questions are ignored outside monitored channels.
+_Avoid_: Workspace, global channel
+
+**Alert Identity**:
+The correlation identity formed from an alert name and a namespace field whose value may be empty. An empty namespace means the alert is cluster-scoped; no synthetic namespace value is introduced. The marker must still contain `namespace=` so its two identity components are explicit.
+_Avoid_: Alert ID, global namespace
+
+**Notification Group**:
+A set of alert instances grouped by Alertmanager for notification delivery. Multiple notification groups may belong to one Alert Identity.
+_Avoid_: Alert Identity
+
+**Notification Status**:
+The `firing` or `resolved` status of one Alertmanager Notification Group, carried in the AlertLens marker alongside—but not as part of—Alert Identity. Firing starts Automatic Investigation; resolved only receives a `large_green_circle` reaction. A missing or unknown status fails with an `x` reaction and causes no Alertmanager or Holmes request.
+_Avoid_: Alert lifecycle state, status as identity
+
+**Thread History**:
+The messages currently available in a Slack thread. Content deleted, edited away, or expired under Slack retention is not part of the history AlertLens can continue from.
+_Avoid_: Thread memory
+
+**Conversation Context**:
+The root message, prior explicit questions addressed to AlertLens, and AlertLens answers currently available in a thread, capped at 256 KiB before being sent to Holmes. The current Ask is sent separately and is not repeated in history. AlertLens reads every Slack page through the current Ask, filters eligible messages, retains the root, then includes the newest eligible messages until that byte limit; there is no separate message-count or page-count limit. Other thread discussion is excluded. If any page cannot be read, the current Ask fails without calling Holmes.
+_Avoid_: Full thread, thread memory, conversation turn limit
+
+**Thread Conversation ID**:
+The Holmes request metadata derived from a Slack channel ID and thread root timestamp: `slack:<channel_id>:<root_ts>`. It groups usage and tool context but does not store or recover conversation history; AlertLens always supplies history reconstructed from Slack. Alert Identity may identify the request source, but does not identify the Holmes conversation.
+_Avoid_: Alert Identity as conversation ID
+
+**Automatic Investigation**:
+An RCA started for each notification whose marker has `status=firing`. It always calls Holmes with the notification event's root message. Alertmanager enrichment is best-effort: a successful query adds every current alert matching Alert Identity, possibly none and possibly spanning multiple Notification Groups; a failed query first posts a warning containing that query's actual sanitized failure reason in the firing thread, then continues without a current alert payload. The root identifies the group that triggered this investigation. Automatic Investigation does not read Slack Thread History or couple its query to Alertmanager `group_by` fields.
+_Avoid_: Cooldown, lifecycle suppression, stored alert episode
+
+**Watchdog**:
+An ordinary firing alert if it reaches a Monitored Channel. AlertLens has no Watchdog-specific branch or heartbeat metrics; an end-to-end dead man's switch must be observed by an independent monitoring path.
+_Avoid_: AlertLens heartbeat, self-monitored dead man's switch
+
+**Ask**:
+An explicit `@AlertLens` question in a Monitored Channel. Every Ask follows the same path: AlertLens reconstructs Conversation Context from Slack and calls Holmes without querying Alertmanager or branching on an AlertLens marker. Holmes may use its configured tools to inspect current system state.
+_Avoid_: Alert follow-up session, marker-specific Ask, Alertmanager-enriched Ask
+
+**Failure Reply**:
+A thread reply containing the actual sanitized and length-bounded failure reason from an Alertmanager enrichment or Holmes request. A Holmes failure produces a Failure Reply for both Ask and Automatic Investigation and marks the operation with an `x` reaction.
+_Avoid_: Generic failure message, fixed timeout reason, reaction-only failure
+
+**Stateless Processing**:
+AlertLens reconstructs each operation from the current Slack event, current Slack Thread History when handling an Ask, and current Alertmanager data when handling firing. It has no state file, session store, lifecycle record, alert snapshot, thread mapping, or persisted Event Receipt. Transient queues, concurrency limits, and in-process locks are coordination rather than memory. Because event IDs are not persisted, a rare Slack redelivery may produce duplicate work or replies.
+_Avoid_: Persistent memory, receipt-only state, restart continuity

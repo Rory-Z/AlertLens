@@ -8,7 +8,6 @@ E2E_NAMESPACE ?= alertlens-e2e
 E2E_RELEASE ?= alertlens-e2e
 E2E_SLACK_SECRET ?= alertlens-e2e-slack
 E2E_SLACK_CHANNEL ?= C099FMSGNEQ
-E2E_STORAGE_CLASS ?= gp3
 E2E_ALERTMANAGER_NAMESPACE ?= victoria
 E2E_ALERTMANAGER_SERVICE ?= vmalertmanager-victoria-metrics-k8s-stack
 E2E_ALERTMANAGER_URL ?= http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093
@@ -59,7 +58,6 @@ e2e-deploy:
 		--set-string 'slack.alertChannels[0]=$(E2E_SLACK_CHANNEL)' \
 		--set-string alertmanagerURL="$(E2E_ALERTMANAGER_URL)" \
 		--set-string holmesURL="$(E2E_HOLMES_URL)" \
-		--set-string state.storageClass="$(E2E_STORAGE_CLASS)" \
 		--set-string 'networkPolicy.internalEgress[0].namespace=$(E2E_ALERTMANAGER_NAMESPACE)' \
 		--set 'networkPolicy.internalEgress[0].ports[0]=$(E2E_ALERTMANAGER_PORT)' \
 		--set-string 'networkPolicy.internalEgress[1].namespace=$(E2E_HOLMES_NAMESPACE)' \

@@ -23,8 +23,7 @@ func TestActiveQueriesAndFiltersAlerts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/alerts" ||
 			r.URL.Query().Get("active") != "true" ||
-			r.URL.Query().Get("silenced") != "false" ||
-			r.URL.Query().Get("inhibited") != "false" {
+			r.URL.Query().Has("silenced") || r.URL.Query().Has("inhibited") {
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
 		}
 		_, _ = io.WriteString(w, alertResponse)
