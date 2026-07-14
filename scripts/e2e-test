@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+deployments=$(kubectl -n "$E2E_NAMESPACE" get deployment \
+  -l 'app.kubernetes.io/name=alertlens' \
+  -o name)
+set -- $deployments
+if [ "$#" -ne 1 ]; then
+  echo "expected one AlertLens deployment in $E2E_NAMESPACE, found $#" >&2
+  exit 1
+fi
+
+deployment=$1
+kubectl -n "$E2E_NAMESPACE" wait \
+  --for=condition=Available "$deployment" \
+  --timeout=30s >/dev/null
+
+secret=$(kubectl -n "$E2E_NAMESPACE" get "$deployment" \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="alertlens")].env[?(@.name=="SLACK_BOT_TOKEN")].valueFrom.secretKeyRef.name}')
+if [ -z "$secret" ]; then
+  echo "$deployment does not reference a Secret for SLACK_BOT_TOKEN" >&2
+  exit 1
+fi
+token=$(kubectl -n "$E2E_NAMESPACE" get secret "$secret" \
+  -o jsonpath='{.data.bot-token}' | base64 -d)
+if [ -z "$token" ]; then
+  echo "Secret $secret is missing bot-token" >&2
+  exit 1
+fi
+
+log=$(mktemp)
+kubectl -n "$E2E_ALERTMANAGER_NAMESPACE" port-forward \
+  "service/$E2E_ALERTMANAGER_SERVICE" \
+  "$E2E_ALERTMANAGER_LOCAL_PORT:$E2E_ALERTMANAGER_PORT" >"$log" 2>&1 &
+forward_pid=$!
+cleanup() {
+  kill "$forward_pid" 2>/dev/null || true
+  wait "$forward_pid" 2>/dev/null || true
+  rm -f "$log"
+}
+trap cleanup EXIT INT TERM
+
+attempt=0
+while ! grep -q 'Forwarding from' "$log"; do
+  if ! kill -0 "$forward_pid" 2>/dev/null; then
+    cat "$log" >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    cat "$log" >&2
+    echo 'timed out starting Alertmanager port-forward' >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+ALERTLENS_E2E=1 \
+  ALERTMANAGER_URL="http://127.0.0.1:$E2E_ALERTMANAGER_LOCAL_PORT" \
+  SLACK_BOT_TOKEN="$token" \
+  E2E_SLACK_CHANNEL="$E2E_SLACK_CHANNEL" \
+  go test -v -timeout=60m -run '^TestE2E$' .
