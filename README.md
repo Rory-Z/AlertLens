@@ -59,7 +59,7 @@ HOLMESGPT_URL=http://holmes:5050 \
 go run ./cmd/alertlens
 ```
 
-The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default. Thread context is capped by `CONVERSATION_MAX_BYTES`, which defaults to 256 KiB; there is no turn-count limit.
+The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default. Thread context is capped by `CONVERSATION_MAX_BYTES`, which defaults to 256 KiB; there is no turn-count limit. `HOLMES_RESPONSE_LANGUAGE` (Helm: `holmesResponseLanguage`) controls the language of successful Holmes answers; it defaults to `auto`, while values such as `zh-CN` add a system-level language directive.
 
 ## Deployment
 
@@ -134,8 +134,9 @@ make e2e-undeploy
 ```
 
 `e2e-deploy` creates the namespace if needed, verifies the external Secret,
-forces the configured image to be pulled, applies namespace-based egress, and
-waits for the deployment to become Ready. `e2e-test` does not deploy anything:
+configures Holmes answers as `zh-CN`, forces the configured image to be pulled,
+applies namespace-based egress, and waits for the deployment to become Ready.
+`e2e-test` does not deploy anything:
 it verifies the release, reads the bot token from the Secret, and temporarily
 port-forwards Alertmanager to the local test process.
 

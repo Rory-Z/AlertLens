@@ -19,6 +19,14 @@ var (
 	slackTokenPattern = regexp.MustCompile(`(?i)\bx(?:oxb|app)-[a-z0-9_-]+`)
 )
 
+func holmesSystemPrompt(responseLanguage string) string {
+	responseLanguage = strings.TrimSpace(responseLanguage)
+	if responseLanguage == "" || strings.EqualFold(responseLanguage, "auto") {
+		return investigationSystemPrompt
+	}
+	return investigationSystemPrompt + " Respond in " + responseLanguage + "."
+}
+
 type alertPayload struct {
 	Identity  marker.Alert         `json:"identity"`
 	Alerts    []alertmanager.Alert `json:"alerts"`
@@ -39,7 +47,7 @@ func buildRequest(event Event, identity marker.Alert, alerts []alertmanager.Aler
 	conversationID := threadLockKey(event.Channel, event.TS)
 	return holmes.Request{
 		Ask:                    ask,
-		AdditionalSystemPrompt: investigationSystemPrompt,
+		AdditionalSystemPrompt: holmesSystemPrompt(cfg.HolmesResponseLanguage),
 		RequestSource:          "alert_investigation",
 		SourceRef:              key,
 		ConversationID:         conversationID,

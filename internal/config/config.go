@@ -9,20 +9,21 @@ import (
 )
 
 type Config struct {
-	SlackBotToken        string
-	SlackAppToken        string
-	AlertChannels        map[string]bool
-	AlertmanagerURL      *url.URL
-	HolmesURL            *url.URL
-	AlertmanagerTimeout  time.Duration
-	HolmesTimeout        time.Duration
-	HolmesMaxConcurrency int
-	EventQueueSize       int
-	AlertPayloadMaxBytes int
-	RunbookMaxBytes      int
-	ConversationMaxBytes int
-	SlackOutputMaxChars  int
-	MetricsAddr          string
+	SlackBotToken          string
+	SlackAppToken          string
+	AlertChannels          map[string]bool
+	AlertmanagerURL        *url.URL
+	HolmesURL              *url.URL
+	AlertmanagerTimeout    time.Duration
+	HolmesTimeout          time.Duration
+	HolmesMaxConcurrency   int
+	EventQueueSize         int
+	AlertPayloadMaxBytes   int
+	RunbookMaxBytes        int
+	ConversationMaxBytes   int
+	SlackOutputMaxChars    int
+	HolmesResponseLanguage string
+	MetricsAddr            string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -74,6 +75,10 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.SlackOutputMaxChars, err = positiveInt(getenv, "SLACK_OUTPUT_MAX_CHARS", 2500); err != nil {
 		return Config{}, err
+	}
+	cfg.HolmesResponseLanguage = strings.TrimSpace(getenv("HOLMES_RESPONSE_LANGUAGE"))
+	if cfg.HolmesResponseLanguage == "" {
+		cfg.HolmesResponseLanguage = "auto"
 	}
 	cfg.MetricsAddr = value(getenv, "METRICS_ADDR", ":9090")
 

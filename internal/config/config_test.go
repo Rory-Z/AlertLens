@@ -21,7 +21,8 @@ func TestLoadDefaults(t *testing.T) {
 		cfg.RunbookMaxBytes != 8192 ||
 		cfg.ConversationMaxBytes != 256<<10 ||
 		cfg.SlackOutputMaxChars != 2500 ||
-		cfg.MetricsAddr != ":9090" {
+		cfg.MetricsAddr != ":9090" ||
+		cfg.HolmesResponseLanguage != "auto" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 	if !cfg.AlertChannels["C1"] || !cfg.AlertChannels["C2"] || len(cfg.AlertChannels) != 2 {
@@ -43,6 +44,7 @@ func TestLoadOverrides(t *testing.T) {
 	env["CONVERSATION_MAX_BYTES"] = "4000"
 	env["SLACK_OUTPUT_MAX_CHARS"] = "500"
 	env["METRICS_ADDR"] = "127.0.0.1:0"
+	env["HOLMES_RESPONSE_LANGUAGE"] = " zh-CN "
 
 	cfg, err := Load(mapEnv(env))
 	if err != nil {
@@ -52,7 +54,8 @@ func TestLoadOverrides(t *testing.T) {
 		cfg.HolmesMaxConcurrency != 2 || cfg.EventQueueSize != 10 ||
 		cfg.AlertPayloadMaxBytes != 1000 || cfg.RunbookMaxBytes != 2000 ||
 		cfg.ConversationMaxBytes != 4000 ||
-		cfg.SlackOutputMaxChars != 500 || cfg.MetricsAddr != "127.0.0.1:0" {
+		cfg.SlackOutputMaxChars != 500 || cfg.MetricsAddr != "127.0.0.1:0" ||
+		cfg.HolmesResponseLanguage != "zh-CN" {
 		t.Fatalf("unexpected overrides: %+v", cfg)
 	}
 }

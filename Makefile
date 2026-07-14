@@ -63,6 +63,7 @@ e2e-deploy:
 		--set-string 'slack.alertChannels[0]=$(E2E_SLACK_CHANNEL)' \
 		--set-string alertmanagerURL="$(E2E_ALERTMANAGER_URL)" \
 		--set-string holmesURL="$(E2E_HOLMES_URL)" \
+		--set-string holmesResponseLanguage=zh-CN \
 		--set-string 'networkPolicy.internalEgress[0].namespace=$(E2E_ALERTMANAGER_NAMESPACE)' \
 		--set 'networkPolicy.internalEgress[0].ports[0]=$(E2E_ALERTMANAGER_PORT)' \
 		--set-string 'networkPolicy.internalEgress[1].namespace=$(E2E_HOLMES_NAMESPACE)' \

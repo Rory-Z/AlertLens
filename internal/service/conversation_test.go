@@ -56,7 +56,7 @@ func TestBoundConversationTruncatesNewestMessageAtBudget(t *testing.T) {
 
 func TestConversationHistoryStartsWithSystemAndSanitizesMessages(t *testing.T) {
 	history := conversationHistory(boundConversation(
-		[]ConversationMessage{{Role: "assistant", Content: "token: secret"}}, 1024))
+		[]ConversationMessage{{Role: "assistant", Content: "token: secret"}}, 1024), investigationSystemPrompt)
 	want := []holmes.Message{
 		{Role: "system", Content: investigationSystemPrompt},
 		{Role: "assistant", Content: "token=[REDACTED]"},
@@ -68,7 +68,7 @@ func TestConversationHistoryStartsWithSystemAndSanitizesMessages(t *testing.T) {
 
 func TestBoundConversationAppliesByteLimitAfterSanitizing(t *testing.T) {
 	bounded := boundConversation([]ConversationMessage{{Role: "user", Content: "token=x"}}, 10)
-	history := conversationHistory(bounded)
+	history := conversationHistory(bounded, investigationSystemPrompt)
 	if got := history[1].Content; got != "token=[RED" || len(got) > 10 {
 		t.Fatalf("bounded sanitized content = %q (%d bytes)", got, len(got))
 	}

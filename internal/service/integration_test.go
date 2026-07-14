@@ -42,7 +42,7 @@ func TestFiringAlert(t *testing.T) {
 	slack := &fakeSlack{}
 	service := startService(t,
 		alertmanager.New(testURL(t, alertmanagerServer.URL), time.Second),
-		holmes.New(testURL(t, holmesServer.URL), time.Second), slack, Config{})
+		holmes.New(testURL(t, holmesServer.URL), time.Second), slack, Config{HolmesResponseLanguage: "zh-CN"})
 	event := Event{Channel: "C1", Text: "FIRING HighCPU\n<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->", TS: "100.1"}
 	if !service.Submit(context.Background(), event) {
 		t.Fatal("event was not accepted")
@@ -60,7 +60,8 @@ func TestFiringAlert(t *testing.T) {
 	}
 	request := <-requestCh
 	if request.RequestSource != "alert_investigation" || request.SourceRef != "am:HighCPU:prod" ||
-		request.ConversationID != "slack:C1:100.1" || request.AdditionalSystemPrompt == "" ||
+		request.ConversationID != "slack:C1:100.1" ||
+		!strings.Contains(request.AdditionalSystemPrompt, "Respond in zh-CN.") ||
 		!strings.Contains(request.Ask, `"alertgroup":"one"`) || !strings.Contains(request.Ask, `"alertgroup":"two"`) {
 		t.Fatalf("Holmes request = %#v", request)
 	}
@@ -72,10 +73,13 @@ func TestFiringAlert(t *testing.T) {
 func TestEveryFiringNotificationRunsRCA(t *testing.T) {
 	var calls atomic.Int32
 	slack := &fakeSlack{}
-	service := startService(t, activeAlertmanager("A", "ns"), holmesFunc(func(context.Context, holmes.Request) (string, error) {
+	service := startService(t, activeAlertmanager("A", "ns"), holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+		if request.AdditionalSystemPrompt != investigationSystemPrompt {
+			t.Errorf("system prompt = %q", request.AdditionalSystemPrompt)
+		}
 		calls.Add(1)
 		return "answer", nil
-	}), slack, Config{})
+	}), slack, Config{HolmesResponseLanguage: "auto"})
 	for _, ts := range []string{"1", "2"} {
 		if !service.Submit(context.Background(), Event{Channel: "C1", TS: ts,
 			Text: `<!-- alertlens:alertname=A,namespace=ns,status=firing -->`}) {
@@ -189,15 +193,16 @@ func TestAskReconstructsAndBoundsSlackConversationWithoutAlertmanager(t *testing
 		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
 			requestCh <- request
 			return "answer", nil
-		}), slack, Config{ConversationMaxBytes: 10})
-	event := Event{Channel: "C1", ThreadTS: "1", TS: "6", Text: "current question", Mention: true}
+		}), slack, Config{ConversationMaxBytes: 10, HolmesResponseLanguage: "zh-CN"})
+	event := Event{Channel: "C1", ThreadTS: "1", TS: "6", Text: "reply in English", Mention: true}
 	if !service.Submit(context.Background(), event) {
 		t.Fatal("Ask was rejected")
 	}
 	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:6") })
 	request := <-requestCh
+	wantPrompt := investigationSystemPrompt + " Respond in zh-CN."
 	wantHistory := []holmes.Message{
-		{Role: "system", Content: investigationSystemPrompt},
+		{Role: "system", Content: wantPrompt},
 		{Role: "user", Content: "root"},
 		{Role: "assistant", Content: "23"},
 		{Role: "user", Content: "45"},
@@ -205,7 +210,8 @@ func TestAskReconstructsAndBoundsSlackConversationWithoutAlertmanager(t *testing
 	}
 	if !slices.Equal(request.ConversationHistory, wantHistory) || request.RequestSource != "freeform" ||
 		request.SourceRef != "slack:C1:1" || request.ConversationID != "slack:C1:1" ||
-		!strings.Contains(request.Ask, "current qu") || len(slack.conversationLog()) != 1 {
+		request.AdditionalSystemPrompt != wantPrompt || !strings.Contains(request.Ask, "reply in E") ||
+		len(slack.conversationLog()) != 1 {
 		t.Fatalf("request = %#v, conversation calls = %#v", request, slack.conversationLog())
 	}
 }

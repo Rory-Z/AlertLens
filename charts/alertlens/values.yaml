@@ -13,6 +13,7 @@ slack:
 
 alertmanagerURL: ""
 holmesURL: ""
+holmesResponseLanguage: auto
 
 service:
   port: 9090

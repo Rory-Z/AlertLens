@@ -9,6 +9,7 @@ tests:
         - C1
       alertmanagerURL: http://alertmanager:9093
       holmesURL: http://holmes:5050
+      holmesResponseLanguage: zh-CN
     asserts:
       - equal:
           path: spec.replicas
@@ -28,3 +29,8 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
       - notExists:
           path: spec.template.spec.volumes
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HOLMES_RESPONSE_LANGUAGE
+            value: zh-CN
