@@ -1,0 +1,68 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+  echo 'usage: scripts/e2e-deploy deploy|undeploy' >&2
+  exit 2
+fi
+
+case "$1" in
+  deploy)
+    image=$IMAGE
+    case "$image" in
+      *@*)
+        echo 'IMAGE must use repository:tag, not a digest' >&2
+        exit 1
+        ;;
+    esac
+    case "${image##*/}" in
+      *:*) ;;
+      *)
+        echo 'IMAGE must include a tag' >&2
+        exit 1
+        ;;
+    esac
+    repository=${image%:*}
+    tag=${image##*:}
+    if [ -z "$tag" ]; then
+      echo 'IMAGE must include a tag' >&2
+      exit 1
+    fi
+
+    kubectl create namespace "$E2E_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+    if ! kubectl -n "$E2E_NAMESPACE" get secret "$E2E_SLACK_SECRET" >/dev/null 2>&1; then
+      echo "missing Secret $E2E_NAMESPACE/$E2E_SLACK_SECRET; create bot-token and app-token keys first" >&2
+      exit 1
+    fi
+    for key in bot-token app-token; do
+      value=$(kubectl -n "$E2E_NAMESPACE" get secret "$E2E_SLACK_SECRET" -o "jsonpath={.data.$key}")
+      if [ -z "$value" ]; then
+        echo "Secret $E2E_SLACK_SECRET is missing $key" >&2
+        exit 1
+      fi
+    done
+
+    helm upgrade --install "$E2E_RELEASE" charts/alertlens \
+      --namespace "$E2E_NAMESPACE" \
+      --wait --timeout 5m \
+      --set-string image.repository="$repository" \
+      --set-string image.tag="$tag" \
+      --set image.pullPolicy=Always \
+      --set-string slack.existingSecret="$E2E_SLACK_SECRET" \
+      --set-string "slack.alertChannels[0]=$E2E_SLACK_CHANNEL" \
+      --set-string alertmanagerURL="$E2E_ALERTMANAGER_URL" \
+      --set-string holmesURL="$E2E_HOLMES_URL" \
+      --set-string holmesResponseLanguage=zh-CN \
+      --set-string "networkPolicy.internalEgress[0].namespace=$E2E_ALERTMANAGER_NAMESPACE" \
+      --set "networkPolicy.internalEgress[0].ports[0]=$E2E_ALERTMANAGER_PORT" \
+      --set-string "networkPolicy.internalEgress[1].namespace=$E2E_HOLMES_NAMESPACE" \
+      --set "networkPolicy.internalEgress[1].ports[0]=$E2E_HOLMES_PORT"
+    ;;
+  undeploy)
+    helm uninstall "$E2E_RELEASE" --namespace "$E2E_NAMESPACE" --ignore-not-found --wait --timeout 5m
+    ;;
+  *)
+    echo 'usage: scripts/e2e-deploy deploy|undeploy' >&2
+    exit 2
+    ;;
+esac

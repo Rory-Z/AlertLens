@@ -24,8 +24,8 @@ Current alert behavior:
 Render the canonical Slack App Manifest for the target environment:
 
 ```bash
-./scripts/render-slack-manifest dev  > /tmp/alertlens-dev.yaml
-./scripts/render-slack-manifest prod > /tmp/alertlens-prod.yaml
+make slack-manifest SLACK_ENV=dev  > /tmp/alertlens-dev.yaml
+make slack-manifest SLACK_ENV=prod > /tmp/alertlens-prod.yaml
 ```
 
 Import the chosen file in Slack to create the app. Generate a separate app-level token with `connections:write`, then install the app to the workspace to obtain its `xoxb` bot token and invite the app to the monitored channel. Store the tokens in the existing Kubernetes Secret as `app-token` and `bot-token`, respectively.
