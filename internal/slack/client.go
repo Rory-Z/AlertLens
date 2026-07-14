@@ -28,18 +28,18 @@ type realSocket struct {
 func (s realSocket) Events() <-chan socketmode.Event { return s.Client.Events }
 
 type Client struct {
-	api       *slackapi.Client
-	socket    socketConnection
-	channels  map[string]bool
-	botUserID string
-	botID     string
-	connected atomic.Bool
+	api              *slackapi.Client
+	socket           socketConnection
+	monitoredChannel string
+	botUserID        string
+	botID            string
+	connected        atomic.Bool
 }
 
-func New(botToken, appToken string, channels map[string]bool) *Client {
+func New(botToken, appToken, monitoredChannel string) *Client {
 	api := slackapi.New(botToken, slackapi.OptionAppLevelToken(appToken))
 	return &Client{
-		api: api, socket: realSocket{socketmode.New(api)}, channels: channels,
+		api: api, socket: realSocket{socketmode.New(api)}, monitoredChannel: monitoredChannel,
 	}
 }
 
@@ -179,7 +179,7 @@ func (c *Client) consume(ctx context.Context, handler func(context.Context, serv
 				if !ok {
 					continue
 				}
-				if translated, ok := translate(apiEvent, c.channels, c.botUserID); ok {
+				if translated, ok := translate(apiEvent, c.monitoredChannel, c.botUserID); ok {
 					handler(ctx, translated)
 				}
 			}
@@ -187,12 +187,12 @@ func (c *Client) consume(ctx context.Context, handler func(context.Context, serv
 	}
 }
 
-func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
+func translate(event slackevents.EventsAPIEvent, monitoredChannel, botUserID string) (service.Event, bool) {
 	switch inner := event.InnerEvent.Data.(type) {
 	case *slackevents.MessageEvent:
-		return translateMessage(inner, channels, botUserID)
+		return translateMessage(inner, monitoredChannel, botUserID)
 	case *slackevents.AppMentionEvent:
-		if !channels[inner.Channel] || inner.User == botUserID || inner.TimeStamp == "" {
+		if inner.Channel != monitoredChannel || inner.User == botUserID || inner.TimeStamp == "" {
 			return service.Event{}, false
 		}
 		text := strings.TrimSpace(strings.ReplaceAll(inner.Text, "<@"+botUserID+">", ""))
@@ -218,9 +218,9 @@ func translate(event slackevents.EventsAPIEvent, channels map[string]bool, botUs
 	}
 }
 
-func translateMessage(message *slackevents.MessageEvent, channels map[string]bool, botUserID string) (service.Event, bool) {
+func translateMessage(message *slackevents.MessageEvent, monitoredChannel, botUserID string) (service.Event, bool) {
 	if (message.SubType != "" && message.SubType != "bot_message") ||
-		message.BotID == "" || !channels[message.Channel] || message.User == botUserID || message.TimeStamp == "" {
+		message.BotID == "" || message.Channel != monitoredChannel || message.User == botUserID || message.TimeStamp == "" {
 		return service.Event{}, false
 	}
 	parts := make([]string, 0, 3)

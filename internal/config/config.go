@@ -11,7 +11,7 @@ import (
 type Config struct {
 	SlackBotToken          string
 	SlackAppToken          string
-	AlertChannels          map[string]bool
+	MonitoredChannel       string
 	AlertmanagerURL        *url.URL
 	HolmesURL              *url.URL
 	AlertmanagerTimeout    time.Duration
@@ -42,8 +42,15 @@ func Load(getenv func(string) string) (Config, error) {
 	if !strings.HasPrefix(cfg.SlackAppToken, "xapp-") {
 		return Config{}, fmt.Errorf("SLACK_APP_TOKEN: must be an app-level token")
 	}
-	if cfg.AlertChannels, err = channels(getenv("SLACK_ALERT_CHANNELS")); err != nil {
-		return Config{}, fmt.Errorf("SLACK_ALERT_CHANNELS: %w", err)
+	if cfg.MonitoredChannel, err = required(getenv, "SLACK_ALERT_CHANNEL"); err != nil {
+		return Config{}, err
+	}
+	cfg.MonitoredChannel = strings.TrimSpace(cfg.MonitoredChannel)
+	if len(cfg.MonitoredChannel) < 2 || (cfg.MonitoredChannel[0] != 'C' && cfg.MonitoredChannel[0] != 'G') ||
+		strings.IndexFunc(cfg.MonitoredChannel[1:], func(r rune) bool {
+			return (r < 'A' || r > 'Z') && (r < '0' || r > '9')
+		}) >= 0 {
+		return Config{}, fmt.Errorf("SLACK_ALERT_CHANNEL: must contain one channel ID")
 	}
 	if cfg.AlertmanagerURL, err = baseURL(getenv, "ALERTMANAGER_URL"); err != nil {
 		return Config{}, err
@@ -113,19 +120,6 @@ func baseURL(getenv func(string) string, key string) (*url.URL, error) {
 		return nil, fmt.Errorf("%s: invalid HTTP URL", key)
 	}
 	return u, nil
-}
-
-func channels(raw string) (map[string]bool, error) {
-	result := make(map[string]bool)
-	for _, item := range strings.Split(raw, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			result[item] = true
-		}
-	}
-	if len(result) == 0 {
-		return nil, fmt.Errorf("at least one channel is required")
-	}
-	return result, nil
 }
 
 func duration(getenv func(string) string, key string, fallback time.Duration) (time.Duration, error) {

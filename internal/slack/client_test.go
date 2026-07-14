@@ -38,7 +38,7 @@ func TestTranslateMessage(t *testing.T) {
 			}},
 		}},
 	}
-	got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
+	got, ok := translate(event, "C1", "U_SELF")
 	if !ok {
 		t.Fatal("event rejected")
 	}
@@ -53,9 +53,9 @@ func TestTranslateMessage(t *testing.T) {
 }
 
 func TestNewBuildsRealSocketClient(t *testing.T) {
-	client := New("xoxb-test", "xapp-test", map[string]bool{"C1": true})
+	client := New("xoxb-test", "xapp-test", "C1")
 	socket, ok := client.socket.(realSocket)
-	if !ok || client.api == nil || socket.Events() == nil || !client.channels["C1"] {
+	if !ok || client.api == nil || socket.Events() == nil || client.monitoredChannel != "C1" {
 		t.Fatalf("client = %#v", client)
 	}
 }
@@ -68,12 +68,12 @@ func TestTranslateUsesNestedMessageFallback(t *testing.T) {
 			User: "U1", BotID: "B1", TimeStamp: "1", Channel: "C1", Message: &slackapi.Msg{Text: "fallback"},
 		}},
 	}
-	got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
+	got, ok := translate(event, "C1", "U_SELF")
 	if !ok || got.Text != "fallback" {
 		t.Fatalf("translate() = (%#v, %v)", got, ok)
 	}
 	event.InnerEvent.Data.(*slackevents.MessageEvent).Message.Text = ""
-	if _, ok := translate(event, map[string]bool{"C1": true}, "U_SELF"); ok {
+	if _, ok := translate(event, "C1", "U_SELF"); ok {
 		t.Fatal("empty event accepted")
 	}
 }
@@ -95,7 +95,7 @@ func TestTranslateAppMention(t *testing.T) {
 					ThreadTimeStamp: tt.threadTS, Channel: "C1",
 				}},
 			}
-			got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
+			got, ok := translate(event, "C1", "U_SELF")
 			if !ok || !got.Mention || got.Channel != "C1" ||
 				got.Text != "investigate prod" || got.TS != "10.1" || got.ThreadTS != tt.threadTS {
 				t.Fatalf("translate() = (%#v, %v)", got, ok)
@@ -113,7 +113,7 @@ func TestTranslateMentionBoundary(t *testing.T) {
 	t.Run("attachment only", func(t *testing.T) {
 		event := base()
 		event.InnerEvent.Data.(*slackevents.AppMentionEvent).Attachments = []slackapi.Attachment{{Text: "question"}}
-		got, ok := translate(event, map[string]bool{"C1": true}, "U_SELF")
+		got, ok := translate(event, "C1", "U_SELF")
 		if !ok || got.Text != "question" {
 			t.Fatalf("translate() = (%#v, %v)", got, ok)
 		}
@@ -130,7 +130,7 @@ func TestTranslateMentionBoundary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			event := base()
 			tt.mutate(event.InnerEvent.Data.(*slackevents.AppMentionEvent))
-			if _, ok := translate(event, map[string]bool{"C1": true}, "U_SELF"); ok {
+			if _, ok := translate(event, "C1", "U_SELF"); ok {
 				t.Fatal("event accepted")
 			}
 		})
@@ -152,31 +152,31 @@ func TestTranslateRejectsIrrelevantMessages(t *testing.T) {
 		message := event.InnerEvent.Data.(*slackevents.MessageEvent)
 		message.BotID = ""
 		message.Text = `<!-- alertlens:alertname=A,namespace=ns,status=firing -->`
-		if _, ok := translate(event, map[string]bool{"C1": true}, "U_SELF"); ok {
+		if _, ok := translate(event, "C1", "U_SELF"); ok {
 			t.Fatal("human marker accepted")
 		}
 	})
 	t.Run("unmonitored channel", func(t *testing.T) {
-		if _, ok := translate(base(), map[string]bool{"C2": true}, "U_SELF"); ok {
+		if _, ok := translate(base(), "C2", "U_SELF"); ok {
 			t.Fatal("event accepted")
 		}
 	})
 	t.Run("self", func(t *testing.T) {
-		if _, ok := translate(base(), map[string]bool{"C1": true}, "U1"); ok {
+		if _, ok := translate(base(), "C1", "U1"); ok {
 			t.Fatal("event accepted")
 		}
 	})
 	t.Run("edited subtype", func(t *testing.T) {
 		event := base()
 		event.InnerEvent.Data.(*slackevents.MessageEvent).SubType = "message_changed"
-		if _, ok := translate(event, map[string]bool{"C1": true}, "U_SELF"); ok {
+		if _, ok := translate(event, "C1", "U_SELF"); ok {
 			t.Fatal("event accepted")
 		}
 	})
 	t.Run("wrong event", func(t *testing.T) {
 		event := base()
 		event.InnerEvent.Data = &slackevents.AppMentionEvent{}
-		if _, ok := translate(event, map[string]bool{"C1": true}, "U_SELF"); ok {
+		if _, ok := translate(event, "C1", "U_SELF"); ok {
 			t.Fatal("event accepted")
 		}
 	})
@@ -601,9 +601,9 @@ func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 	defer apiServer.Close()
 	socket := newFakeSocket()
 	client := &Client{
-		api:      slackapi.New("xoxb-test", slackapi.OptionAPIURL(apiServer.URL+"/api/")),
-		socket:   socket,
-		channels: map[string]bool{"C1": true},
+		api:              slackapi.New("xoxb-test", slackapi.OptionAPIURL(apiServer.URL+"/api/")),
+		socket:           socket,
+		monitoredChannel: "C1",
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -622,6 +622,15 @@ func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 	socket.events <- socketmode.Event{
 		Type: socketmode.EventTypeEventsAPI,
 		Data: slackevents.EventsAPIEvent{
+			InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MessageEvent{
+				User: "U1", BotID: "B1", Text: "ignored", TimeStamp: "0", Channel: "C2",
+			}},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env0"},
+	}
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
 			Type: slackevents.CallbackEvent,
 			Data: &slackevents.EventsAPICallbackEvent{EventID: "Ev1"},
 			InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MessageEvent{
@@ -631,7 +640,10 @@ func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 		Request: &socketmode.Request{EnvelopeID: "env1"},
 	}
 	select {
-	case <-handled:
+	case event := <-handled:
+		if event.Channel != "C1" {
+			t.Fatalf("handled channel %q", event.Channel)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("event not handled")
 	}
@@ -682,7 +694,7 @@ func TestRunReturnsAuthenticationAndSocketErrors(t *testing.T) {
 		defer server.Close()
 		client := &Client{
 			api:    slackapi.New("xoxb-test", slackapi.OptionAPIURL(server.URL+"/api/")),
-			socket: newFakeSocket(), channels: map[string]bool{"C1": true},
+			socket: newFakeSocket(), monitoredChannel: "C1",
 		}
 		if err := client.Run(context.Background(), func(context.Context, service.Event) bool { return true }); err == nil {
 			t.Fatal("expected error")
@@ -698,7 +710,7 @@ func TestRunReturnsAuthenticationAndSocketErrors(t *testing.T) {
 		socket.runErr = errors.New("connection failed")
 		client := &Client{
 			api:    slackapi.New("xoxb-test", slackapi.OptionAPIURL(server.URL+"/api/")),
-			socket: socket, channels: map[string]bool{"C1": true},
+			socket: socket, monitoredChannel: "C1",
 		}
 		if err := client.Run(context.Background(), func(context.Context, service.Event) bool { return true }); err == nil {
 			t.Fatal("expected error")

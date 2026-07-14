@@ -86,7 +86,7 @@ an older firing thread or call Alertmanager/Holmes.
 
 ## Ask Semantics
 
-Only explicit `@AlertLens` messages in configured channels are handled. Every
+Only explicit `@AlertLens` messages in the Monitored Channel are handled. Every
 Ask follows the same path, regardless of whether the thread root is an alert or
 ordinary Slack message:
 

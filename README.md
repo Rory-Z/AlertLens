@@ -45,7 +45,7 @@ Go 1.25 or newer is required. The service reads configuration from the environme
 
 - `SLACK_BOT_TOKEN`
 - `SLACK_APP_TOKEN`
-- `SLACK_ALERT_CHANNELS` (comma-separated public or private channel IDs)
+- `SLACK_ALERT_CHANNEL` (one public or private channel ID; commas are rejected)
 - `ALERTMANAGER_URL`
 - `HOLMESGPT_URL`
 
@@ -54,7 +54,7 @@ Use non-production placeholder credentials for the current foundation:
 ```bash
 SLACK_BOT_TOKEN=xoxb-test \
 SLACK_APP_TOKEN=xapp-test \
-SLACK_ALERT_CHANNELS=C1 \
+SLACK_ALERT_CHANNEL=C1 \
 ALERTMANAGER_URL=http://alertmanager:9093 \
 HOLMESGPT_URL=http://holmes:5050 \
 go run ./cmd/alertlens
@@ -173,7 +173,7 @@ go test -race -coverprofile=coverage.out ./...
 go build ./cmd/alertlens
 helm lint charts/alertlens \
   --set slack.existingSecret=alertlens-slack \
-  --set-string 'slack.alertChannels[0]=C1' \
+  --set-string slack.alertChannel=C1 \
   --set alertmanagerURL=http://alertmanager:9093 \
   --set holmesURL=http://holmes:5050
 ```

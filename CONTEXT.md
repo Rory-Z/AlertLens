@@ -9,8 +9,8 @@ An intentionally injected Alertmanager alert that follows normal alert routing b
 _Avoid_: Fake alert, test event
 
 **Monitored Channel**:
-A Slack channel explicitly configured for AlertLens. Automatic alert handling and explicit questions are ignored outside monitored channels.
-_Avoid_: Workspace, global channel
+The single Slack channel assigned to an AlertLens installation. Automatic alert handling and explicit questions are ignored outside it.
+_Avoid_: Monitored channels, channel allowlist, workspace, global channel
 
 **Alert Identity**:
 The correlation identity formed from an alert name and a namespace field whose value may be empty. An empty namespace means the alert is cluster-scoped; no synthetic namespace value is introduced. The marker must still contain `namespace=` so its two identity components are explicit.

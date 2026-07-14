@@ -9,7 +9,7 @@ fullnameOverride: ""
 
 slack:
   existingSecret: ""
-  alertChannels: []
+  alertChannel: ""
 
 alertmanagerURL: ""
 holmesURL: ""
