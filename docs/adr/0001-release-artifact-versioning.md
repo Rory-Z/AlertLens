@@ -1,0 +1,3 @@
+# Version release artifacts by ecosystem
+
+AlertLens uses one bare SemVer for the Helm chart version, app version, Docker image tag, and Helm OCI tag, while the Git tag and GitHub Release add Go's `v` prefix. A release succeeds only after its multi-arch `ghcr.io/rory-z/alertlens:<version>` image and `ghcr.io/rory-z/charts/alertlens:<version>` chart are published, with the GitHub Release created last; prereleases follow the same flow, while `latest` remains the amd64 snapshot of `main`. This follows each ecosystem's version convention and keeps the image and chart in separate OCI repositories so identical version tags cannot collide.
