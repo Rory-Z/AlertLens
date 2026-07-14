@@ -32,6 +32,11 @@ build-push:
 		$(MAKE) build push IMAGE="$(IMAGE)"; \
 	fi
 
+# create slack secret for e2e test
+# kubectl create namespace alertlens-e2e --dry-run=client -o yaml | kubectl apply -f -
+# kubectl -n alertlens-e2e create secret generic alertlens-e2e-slack \
+#   --from-literal=bot-token='xoxb-YOUR-BOT-TOKEN' \
+#   --from-literal=app-token='xapp-YOUR-APP-TOKEN'
 e2e-deploy:
 	@set -eu; \
 	image='$(IMAGE)'; \
