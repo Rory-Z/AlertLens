@@ -67,6 +67,9 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.AlertPayloadMaxBytes, err = positiveInt(getenv, "ALERT_PAYLOAD_MAX_BYTES", 32768); err != nil {
 		return Config{}, err
 	}
+	if cfg.AlertPayloadMaxBytes < 128 {
+		return Config{}, fmt.Errorf("ALERT_PAYLOAD_MAX_BYTES: must be at least 128")
+	}
 	if cfg.RunbookMaxBytes, err = positiveInt(getenv, "RUNBOOK_MAX_BYTES", 8192); err != nil {
 		return Config{}, err
 	}

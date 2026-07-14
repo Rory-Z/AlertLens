@@ -21,8 +21,16 @@ A set of alert instances grouped by Alertmanager for notification delivery. Mult
 _Avoid_: Alert Identity
 
 **Notification Status**:
-The `firing` or `resolved` status of one Alertmanager Notification Group, carried in the AlertLens marker alongside—but not as part of—Alert Identity. Firing starts Automatic Investigation; resolved only receives a `large_green_circle` reaction. A missing or unknown status fails with an `x` reaction and causes no Alertmanager or Holmes request.
+The `firing` or `resolved` status of one Alertmanager Notification Group, carried in the AlertLens marker alongside—but not as part of—Alert Identity. Firing starts Active Alert Verification; resolved only receives a `large_green_circle` reaction. A missing or unknown status fails with an `x` reaction and causes no Alertmanager or Holmes request.
 _Avoid_: Alert lifecycle state, status as identity
+
+**Active Alert Verification**:
+The point-in-time prerequisite performed by AlertLens before asking Holmes to run an Automatic Investigation: Alertmanager must successfully return at least one current active alert matching Alert Identity; silenced and inhibited matches still count as active. A failed query or zero matches ends the operation with an `x` and a distinct Failure Reply; a later resolution does not cancel an investigation that already passed verification.
+_Avoid_: Best-effort enrichment, Slack-only confirmation
+
+**Verified Alert Snapshot**:
+The bounded matching-alert data passed to Holmes after Active Alert Verification. It always preserves the successful verification fact and Alert Identity; instance details may be truncated without invalidating verification.
+_Avoid_: Full Alertmanager response, unverified enrichment
 
 **Thread History**:
 The messages currently available in a Slack thread. Content deleted, edited away, or expired under Slack retention is not part of the history AlertLens can continue from.
@@ -37,7 +45,7 @@ The Holmes request metadata derived from a Slack channel ID and thread root time
 _Avoid_: Alert Identity as conversation ID
 
 **Automatic Investigation**:
-An RCA started for each notification whose marker has `status=firing`. It always calls Holmes with the notification event's root message. Alertmanager enrichment is best-effort: a successful query adds every current alert matching Alert Identity, possibly none and possibly spanning multiple Notification Groups; a failed query first posts a warning containing that query's actual sanitized failure reason in the firing thread, then continues without a current alert payload. The root identifies the group that triggered this investigation. Automatic Investigation does not read Slack Thread History or couple its query to Alertmanager `group_by` fields.
+An RCA started for each notification whose marker has `status=firing` after Active Alert Verification succeeds. It calls Holmes with the notification event's root message and Verified Alert Snapshot, which may span multiple Notification Groups. The root identifies the group that triggered this investigation. Automatic Investigation does not read Slack Thread History or couple its query to Alertmanager `group_by` fields.
 _Avoid_: Cooldown, lifecycle suppression, stored alert episode
 
 **Watchdog**:
@@ -45,11 +53,11 @@ An ordinary firing alert if it reaches a Monitored Channel. AlertLens has no Wat
 _Avoid_: AlertLens heartbeat, self-monitored dead man's switch
 
 **Ask**:
-An explicit `@AlertLens` question in a Monitored Channel. Every Ask follows the same path: AlertLens reconstructs Conversation Context from Slack and calls Holmes without querying Alertmanager or branching on an AlertLens marker. Holmes may use its configured tools to inspect current system state.
+An explicit `@AlertLens` question in a Monitored Channel. Every Ask follows the same path—even in an alert thread: AlertLens reconstructs Conversation Context from Slack and calls Holmes without Active Alert Verification or branching on an AlertLens marker. Holmes may use its configured tools to inspect current system state.
 _Avoid_: Alert follow-up session, marker-specific Ask, Alertmanager-enriched Ask
 
 **Failure Reply**:
-A thread reply containing the actual sanitized and length-bounded failure reason from an Alertmanager enrichment or Holmes request. A Holmes failure produces a Failure Reply for both Ask and Automatic Investigation and marks the operation with an `x` reaction.
+A thread reply containing a sanitized and length-bounded failure reason. Active Alert Verification distinguishes a query's actual failure reason from an explicit zero-match reason; a Holmes failure reports its actual reason, and each case marks the operation with an `x` reaction.
 _Avoid_: Generic failure message, fixed timeout reason, reaction-only failure
 
 **Holmes Response Language**:

@@ -23,7 +23,7 @@ AlertLens keeps:
 
 - Slack Socket Mode for Alertmanager bot messages and explicit app mentions;
 - thread replies and message reactions;
-- best-effort Alertmanager enrichment for firing notifications;
+- required active-alert verification for firing notifications;
 - bounded read-only HolmesGPT requests;
 - Slack-derived context for explicit thread questions;
 - health, readiness, and low-cardinality operational metrics.
@@ -64,15 +64,22 @@ group:
 <!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->
 ```
 
-Every firing notification runs RCA. AlertLens queries all current active
-instances matching the binary identity, so the payload may include instances
-from several Notification Groups. It does not put `group_by` fields into the
-marker or selector. The Slack notification itself identifies the group that
-triggered the current RCA.
+Every firing notification first performs Active Alert Verification. AlertLens
+queries all current active instances matching the binary identity; silenced and
+inhibited matches still count as active. A successful point-in-time verification
+starts RCA with a bounded Verified Alert Snapshot that may include instances
+from several Notification Groups. The snapshot always preserves `verified`,
+Alert Identity, and whether instance details were truncated. It does not put
+`group_by` fields into the marker or selector. The Slack notification itself
+identifies the group that triggered the current RCA.
 
 If Alertmanager cannot be queried, AlertLens posts the actual sanitized error
-reason and continues RCA without current-alert enrichment. This keeps a
-transient enrichment outage from hiding the more useful Holmes investigation.
+reason, marks the operation failed, and does not call Holmes. A successful query
+with zero matches produces a distinct no-match failure with the same outcome and
+is not retried. A later resolution does not cancel an RCA that already passed
+verification. If the verified identity itself cannot fit the alert payload
+budget, the operation also fails before Holmes rather than dropping verification
+fields.
 
 A resolved notification only receives `large_green_circle`. It does not update
 an older firing thread or call Alertmanager/Holmes.
@@ -109,8 +116,10 @@ The reaction sequence makes state visible without extra channel messages:
 | `x` | operation failed |
 
 Holmes failures for both RCA and Ask produce a thread reply containing the
-actual sanitized and bounded error. Alertmanager failures do the same before
-RCA continues. Reaction failures do not prevent investigation or replies.
+actual sanitized and bounded error. Active Alert Verification distinguishes an
+Alertmanager query error from a successful query with zero matches; both stop
+before Holmes and produce `x`. Reaction failures do not prevent investigation
+or replies.
 
 Watchdog is an ordinary firing alert when routed to AlertLens. A dead man's
 switch must not depend on the component whose path it is intended to test, so
@@ -149,16 +158,24 @@ NetworkPolicy limits egress to DNS, Slack HTTPS, Alertmanager, and HolmesGPT.
 
 ```gherkin
 Given Alertmanager posts a valid firing notification in a monitored Slack channel
+And Alertmanager has a matching active alert
 When AlertLens receives it
 Then AlertLens performs one automatic investigation for that notification
 And posts the RCA in that notification's thread
 ```
 
 ```gherkin
-Given Alertmanager enrichment fails
-When a firing investigation runs
-Then AlertLens posts the actual sanitized enrichment error
-And still asks Holmes without current-alert enrichment
+Given Alertmanager verification cannot query Alertmanager
+When a firing notification is handled
+Then AlertLens posts the actual sanitized query error
+And marks the notification failed without calling Holmes
+```
+
+```gherkin
+Given Alertmanager verification finds no matching active alert
+When a firing notification is handled
+Then AlertLens posts an explicit no-match failure
+And marks the notification failed without calling Holmes
 ```
 
 ```gherkin

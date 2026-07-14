@@ -80,6 +80,7 @@ func TestLoadRejectsInvalidValuesWithoutLeakingSecrets(t *testing.T) {
 		{name: "positive integer", key: "EVENT_QUEUE_SIZE", value: "0"},
 		{name: "Holmes concurrency", key: "HOLMESGPT_MAX_CONCURRENCY", value: "0"},
 		{name: "alert payload limit", key: "ALERT_PAYLOAD_MAX_BYTES", value: "0"},
+		{name: "alert payload minimum", key: "ALERT_PAYLOAD_MAX_BYTES", value: "127"},
 		{name: "runbook limit", key: "RUNBOOK_MAX_BYTES", value: "0"},
 		{name: "conversation bytes", key: "CONVERSATION_MAX_BYTES", value: "0"},
 		{name: "Slack output limit", key: "SLACK_OUTPUT_MAX_CHARS", value: "0"},

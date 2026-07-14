@@ -306,9 +306,10 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 			return
 		}
 		_, _ = io.WriteString(w, `[
-          {"labels":{"alertname":"HighCPU","namespace":"prod","alertgroup":"one"}},
-          {"labels":{"alertname":"HighCPU","namespace":"prod","alertgroup":"two"}}
-        ]`)
+	          {"labels":{"alertname":"HighCPU","namespace":"prod","alertgroup":"one"}},
+	          {"labels":{"alertname":"HighCPU","namespace":"prod","alertgroup":"two"}},
+	          {"labels":{"alertname":"Watchdog"}}
+	        ]`)
 	}))
 	defer alertmanagerServer.Close()
 
@@ -467,15 +468,16 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 	holmesStatus.Store(0)
 
 	alertmanagerStatus.Store(http.StatusBadRequest)
+	holmesBeforeVerificationFailure := holmesCalls.Load()
 	if !worker.Submit(ctx, service.Event{Channel: "C1", TS: "11",
 		Text: `<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->`}) {
-		t.Fatal("enrichment-failing firing rejected")
+		t.Fatal("verification-failing firing rejected")
 	}
-	alertmanagerFailure, continuedRCA := <-posts, <-posts
-	<-holmesRequests
+	alertmanagerFailure := <-posts
+	waitForReaction(t, reactions, "x", "11")
 	if !strings.Contains(alertmanagerFailure.Get("text"), "Alertmanager returned HTTP 400") ||
-		continuedRCA.Get("text") != "answer-7" {
-		t.Fatalf("Alertmanager failure posts = %#v %#v", alertmanagerFailure, continuedRCA)
+		holmesCalls.Load() != holmesBeforeVerificationFailure {
+		t.Fatalf("Alertmanager failure post = %#v, Holmes calls = %d", alertmanagerFailure, holmesCalls.Load())
 	}
 	alertmanagerStatus.Store(0)
 

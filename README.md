@@ -9,7 +9,8 @@ The firing, resolved, ad-hoc, and thread follow-up paths are implemented. See th
 Current alert behavior:
 
 - marked Slack notifications must include `alertname`, `namespace`, and `status=firing|resolved`
-- every firing notification runs one RCA; Alertmanager enrichment is best-effort
+- every firing notification must match a current active Alertmanager alert before HolmesGPT runs
+- an Alertmanager query failure or zero matches receives `x` and a distinct thread failure without calling HolmesGPT
 - a resolved notification only receives `large_green_circle`; it does not update an older thread
 - Watchdog is handled like any other firing alert
 - a top-level `@AlertLens` asks HolmesGPT and creates a reply thread
