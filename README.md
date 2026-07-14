@@ -118,7 +118,9 @@ The defaults are:
 Create the namespace before provisioning the Secret. Every default is a Make
 variable and can be overridden on the command line; an exported `KUBECONFIG`
 takes precedence over the default. `IMAGE` must use `repository:tag` form;
-tagless and digest references are rejected.
+tagless and digest references are rejected. `E2E_RELEASE` is only used by the
+deploy and undeploy targets, while `E2E_SLACK_SECRET` is only used by the deploy
+target.
 
 ```bash
 kubectl create namespace alertlens-e2e --dry-run=client -o yaml | kubectl apply -f -
@@ -132,14 +134,20 @@ make build-push IMAGE_PLATFORMS=linux/amd64,linux/arm64
 make e2e-deploy
 make e2e-test
 make e2e-undeploy
+
+# Or test an existing GitOps deployment:
+make e2e-test E2E_NAMESPACE=alertlens E2E_SLACK_CHANNEL=C099FMSGNEQ
 ```
 
 `e2e-deploy` creates the namespace if needed, verifies the external Secret,
 configures Holmes answers as `zh-CN`, forces the configured image to be pulled,
 applies namespace-based egress, and waits for the deployment to become Ready.
 `e2e-test` does not deploy anything:
-it verifies the release, reads the bot token from the Secret, and temporarily
-port-forwards Alertmanager to the local test process.
+it finds the single `app.kubernetes.io/name=alertlens` deployment in the target
+namespace, waits for it to become Available, reads the bot token from the
+Secret referenced by its `SLACK_BOT_TOKEN` environment variable, and
+temporarily port-forwards Alertmanager to the local test process. It does not
+require Helm release state or inspect the Argo CD Application.
 
 The test injects a clearly labelled synthetic alert, waits for the RCA, and
 prints an `ACTION REQUIRED` prompt with a direct Slack thread link. Mention

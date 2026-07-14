@@ -71,12 +71,15 @@ e2e-deploy:
 
 e2e-test:
 	@set -eu; \
-	helm status "$(E2E_RELEASE)" -n "$(E2E_NAMESPACE)" >/dev/null 2>&1 || { echo "run make e2e-deploy first" >&2; exit 1; }; \
-	deployment=$$(kubectl -n "$(E2E_NAMESPACE)" get deployment -l "app.kubernetes.io/instance=$(E2E_RELEASE)" -o jsonpath='{.items[0].metadata.name}'); \
-	if [ -z "$$deployment" ]; then echo "AlertLens deployment not found" >&2; exit 1; fi; \
-	kubectl -n "$(E2E_NAMESPACE)" wait --for=condition=Available "deployment/$$deployment" --timeout=30s >/dev/null; \
-	token=$$(kubectl -n "$(E2E_NAMESPACE)" get secret "$(E2E_SLACK_SECRET)" -o jsonpath='{.data.bot-token}' | base64 -d); \
-	if [ -z "$$token" ]; then echo "Secret $(E2E_SLACK_SECRET) is missing bot-token" >&2; exit 1; fi; \
+	deployments=$$(kubectl -n "$(E2E_NAMESPACE)" get deployment -l "app.kubernetes.io/name=alertlens" -o name); \
+	set -- $$deployments; \
+	if [ "$$#" -ne 1 ]; then echo "expected one AlertLens deployment in $(E2E_NAMESPACE), found $$#" >&2; exit 1; fi; \
+	deployment=$$1; \
+	kubectl -n "$(E2E_NAMESPACE)" wait --for=condition=Available "$$deployment" --timeout=30s >/dev/null; \
+	secret=$$(kubectl -n "$(E2E_NAMESPACE)" get "$$deployment" -o jsonpath='{.spec.template.spec.containers[?(@.name=="alertlens")].env[?(@.name=="SLACK_BOT_TOKEN")].valueFrom.secretKeyRef.name}'); \
+	if [ -z "$$secret" ]; then echo "$$deployment does not reference a Secret for SLACK_BOT_TOKEN" >&2; exit 1; fi; \
+	token=$$(kubectl -n "$(E2E_NAMESPACE)" get secret "$$secret" -o jsonpath='{.data.bot-token}' | base64 -d); \
+	if [ -z "$$token" ]; then echo "Secret $$secret is missing bot-token" >&2; exit 1; fi; \
 	log=$$(mktemp); \
 	kubectl -n "$(E2E_ALERTMANAGER_NAMESPACE)" port-forward "service/$(E2E_ALERTMANAGER_SERVICE)" "$(E2E_ALERTMANAGER_LOCAL_PORT):$(E2E_ALERTMANAGER_PORT)" >"$$log" 2>&1 & \
 	forward_pid=$$!; \
