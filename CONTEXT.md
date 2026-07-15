@@ -12,6 +12,10 @@ _Avoid_: Fake alert, test event
 The single Slack channel assigned to an AlertLens installation. Automatic alert handling and explicit questions are ignored outside it.
 _Avoid_: Monitored channels, channel allowlist, workspace, global channel
 
+**Investigation Workspace**:
+The Slack thread where responders read AlertLens investigation results and continue with Ask. Alertmanager independently delivers the same alert to PagerDuty, which owns paging, acknowledgement, and resolution; its incident is not a second AlertLens conversation surface.
+_Avoid_: PagerDuty conversation, dual-channel RCA
+
 **Alert Identity**:
 The correlation identity formed from an alert name and a namespace field whose value may be empty. An empty namespace means the alert is cluster-scoped; no synthetic namespace value is introduced. The marker must still contain `namespace=` so its two identity components are explicit.
 _Avoid_: Alert ID, global namespace
