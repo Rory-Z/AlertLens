@@ -411,6 +411,259 @@ func TestSameSlackThreadIsSerialized(t *testing.T) {
 	waitFor(t, func() bool { return calls.Load() == 2 })
 }
 
+func TestScheduledInvestigationCreatesRootAndRepliesInThread(t *testing.T) {
+	requestCh := make(chan holmes.Request, 1)
+	slack := &fakeSlack{rootTS: "100.1"}
+	service := startService(t,
+		alertmanagerFunc(func(context.Context, string, string) ([]alertmanager.Alert, error) {
+			t.Fatal("Alertmanager must not be called for a Scheduled Investigation")
+			return nil, nil
+		}),
+		holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+			requestCh <- request
+			return "platform is healthy", nil
+		}), slack, Config{MonitoredChannel: "C1", HolmesResponseLanguage: "zh-CN"})
+	investigation := ScheduledInvestigation{
+		Name: "daily health", Schedule: "0 1 * * *", Prompt: "Investigate the platform health exactly as configured.\n",
+	}
+
+	if !service.SubmitScheduled(context.Background(), investigation) {
+		t.Fatal("Scheduled Investigation was not accepted")
+	}
+	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:100.1") })
+	request := <-requestCh
+	if request.Ask != investigation.Prompt || request.RequestSource != "scheduled_investigation" ||
+		request.SourceRef != "schedule:daily health" || request.ConversationID != "slack:C1:100.1" ||
+		request.AdditionalSystemPrompt != "Investigate using read-only tools. Do not mutate infrastructure. Respond in zh-CN." ||
+		len(request.ConversationHistory) != 0 {
+		t.Fatalf("Holmes request = %#v", request)
+	}
+	if got := slack.postLog(); !slices.Equal(got, []string{"C1:Scheduled investigation started: daily health"}) {
+		t.Fatalf("posts = %#v", got)
+	}
+	if got := slack.replyLog(); !slices.Equal(got, []string{"C1:100.1:platform is healthy"}) {
+		t.Fatalf("replies = %#v", got)
+	}
+	wantReactions := []string{
+		"add:hourglass_flowing_sand:C1:100.1",
+		"remove:hourglass_flowing_sand:C1:100.1",
+		"add:white_check_mark:C1:100.1",
+	}
+	if got := slack.reactionLog(); !slices.Equal(got, wantReactions) {
+		t.Fatalf("reactions = %#v, want %#v", got, wantReactions)
+	}
+	w := httptest.NewRecorder()
+	service.metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(w.Body.String(), `alertlens_scheduled_investigations_total{outcome="success"} 1`) {
+		t.Fatalf("metrics = %q", w.Body.String())
+	}
+}
+
+func TestScheduledInvestigationStopsWhenRootCannotBeCreated(t *testing.T) {
+	var holmesCalls atomic.Int32
+	slack := &fakeSlack{postErr: errors.New("Slack unavailable")}
+	service := newService(nil, holmesFunc(func(context.Context, holmes.Request) (string, error) {
+		holmesCalls.Add(1)
+		return "answer", nil
+	}), slack, Config{MonitoredChannel: "C1"})
+
+	if service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "daily", Prompt: "investigate"}) {
+		t.Fatal("Scheduled Investigation was accepted without a root message")
+	}
+	if holmesCalls.Load() != 0 || len(slack.replyLog()) != 0 || len(slack.reactionLog()) != 0 {
+		t.Fatalf("Holmes calls = %d, replies = %#v, reactions = %#v",
+			holmesCalls.Load(), slack.replyLog(), slack.reactionLog())
+	}
+}
+
+func TestScheduledInvestigationQueueFailureRepliesInRootThread(t *testing.T) {
+	slack := &fakeSlack{rootTS: "2"}
+	service := newService(nil, nil, slack, Config{MonitoredChannel: "C1", QueueSize: 1, Workers: 1})
+	investigation := ScheduledInvestigation{Name: "daily", Prompt: "investigate"}
+	if !service.SubmitScheduled(context.Background(), investigation) {
+		t.Fatal("first run was rejected")
+	}
+	if service.SubmitScheduled(context.Background(), investigation) {
+		t.Fatal("second run was accepted into a full queue")
+	}
+	if got := slack.replyLog(); len(got) != 1 || !strings.Contains(got[0], "C1:2:"+ScheduledFailureReplyPrefix) ||
+		!strings.Contains(got[0], "queue is full") {
+		t.Fatalf("replies = %#v", got)
+	}
+	if !slack.hasReaction("add:x:C1:2") {
+		t.Fatalf("reactions = %#v", slack.reactionLog())
+	}
+}
+
+func TestAskWaitsForScheduledInvestigationAndUsesSlackHistory(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	requests := make(chan holmes.Request, 2)
+	var calls atomic.Int32
+	slack := &fakeSlack{
+		rootTS: "100.1",
+		conversation: []ConversationMessage{
+			{Role: "user", Content: "Scheduled investigation started: daily health"},
+			{Role: "assistant", Content: "initial answer"},
+		},
+	}
+	service := startService(t, nil, holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
+		requests <- request
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return "answer", nil
+	}), slack, Config{MonitoredChannel: "C1", Workers: 2})
+	prompt := "configured prompt that must not be injected into follow-up history"
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "daily health", Prompt: prompt}) {
+		t.Fatal("Scheduled Investigation was rejected")
+	}
+	<-firstStarted
+	if !service.Submit(context.Background(), Event{
+		Channel: "C1", ThreadTS: "100.1", TS: "100.2", Text: "what changed?", Mention: true,
+	}) {
+		t.Fatal("Ask was rejected")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if calls.Load() != 1 {
+		t.Fatalf("Holmes calls before initial result = %d", calls.Load())
+	}
+	close(releaseFirst)
+	waitFor(t, func() bool { return calls.Load() == 2 })
+	<-requests
+	followUp := <-requests
+	wantHistory := []holmes.Message{
+		{Role: "system", Content: investigationSystemPrompt},
+		{Role: "user", Content: "Scheduled investigation started: daily health"},
+		{Role: "assistant", Content: "initial answer"},
+	}
+	if !slices.Equal(followUp.ConversationHistory, wantHistory) || followUp.RequestSource != "freeform" ||
+		followUp.ConversationID != "slack:C1:100.1" || strings.Contains(
+		strings.Join(messageContents(followUp.ConversationHistory), "\n"), prompt) {
+		t.Fatalf("follow-up request = %#v", followUp)
+	}
+}
+
+func TestScheduledInvestigationReportsForcedShutdownInRootThread(t *testing.T) {
+	holmesStarted := make(chan struct{})
+	slack := &fakeSlack{rootTS: "100.1"}
+	service := newService(nil, holmesFunc(func(ctx context.Context, _ holmes.Request) (string, error) {
+		close(holmesStarted)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}), slack, Config{MonitoredChannel: "C1"})
+	service.drainTimeout = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "daily", Prompt: "investigate"}) {
+		t.Fatal("Scheduled Investigation was rejected")
+	}
+	<-holmesStarted
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("service did not stop")
+	}
+	if got := slack.replyLog(); len(got) != 1 || !strings.Contains(got[0], "AlertLens shutting down") {
+		t.Fatalf("replies = %#v", got)
+	}
+	if !slack.hasReaction("add:x:C1:100.1") {
+		t.Fatalf("reactions = %#v", slack.reactionLog())
+	}
+}
+
+func TestQueuedScheduledInvestigationReportsForcedShutdownInRootThread(t *testing.T) {
+	holmesStarted := make(chan struct{})
+	slack := &fakeSlack{rootTSs: []string{"100.1", "200.1"}}
+	service := newService(nil, holmesFunc(func(ctx context.Context, _ holmes.Request) (string, error) {
+		close(holmesStarted)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}), slack, Config{MonitoredChannel: "C1", QueueSize: 1, Workers: 1})
+	service.drainTimeout = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "first", Prompt: "investigate"}) {
+		t.Fatal("first Scheduled Investigation was rejected")
+	}
+	<-holmesStarted
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "second", Prompt: "investigate"}) {
+		t.Fatal("second Scheduled Investigation was rejected")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("service did not stop")
+	}
+	replies := strings.Join(slack.replyLog(), "\n")
+	for _, rootTS := range []string{"100.1", "200.1"} {
+		if !strings.Contains(replies, "C1:"+rootTS+":AlertLens shutting down") ||
+			!slack.hasReaction("add:x:C1:"+rootTS) {
+			t.Fatalf("replies = %q, reactions = %#v", replies, slack.reactionLog())
+		}
+	}
+}
+
+func TestForcedShutdownUsesOneDeadlineForQueuedScheduledReplies(t *testing.T) {
+	holmesStarted := make(chan struct{})
+	var replyContexts []context.Context
+	slack := &fakeSlack{
+		rootTSs: []string{"100.1", "200.1", "300.1", "400.1", "500.1"},
+		replyFunc: func(ctx context.Context, _ string, threadTS string, _ string) error {
+			if threadTS != "100.1" {
+				replyContexts = append(replyContexts, ctx)
+			}
+			return nil
+		},
+	}
+	service := newService(nil, holmesFunc(func(ctx context.Context, _ holmes.Request) (string, error) {
+		close(holmesStarted)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}), slack, Config{MonitoredChannel: "C1", QueueSize: 4, Workers: 1})
+	service.drainTimeout = 5 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	for i := range 5 {
+		if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{
+			Name: "run-" + string(rune('1'+i)), Prompt: "investigate",
+		}) {
+			t.Fatalf("run %d was rejected", i+1)
+		}
+		if i == 0 {
+			<-holmesStarted
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("service did not stop")
+	}
+	if len(replyContexts) != 4 {
+		t.Fatalf("shutdown reply contexts = %d", len(replyContexts))
+	}
+	for _, replyCtx := range replyContexts[1:] {
+		if replyCtx != replyContexts[0] {
+			t.Fatal("queued shutdown replies did not share one deadline")
+		}
+	}
+}
+
+func messageContents(messages []holmes.Message) []string {
+	contents := make([]string, len(messages))
+	for i, message := range messages {
+		contents[i] = message.Content
+	}
+	return contents
+}
+
 func newService(am Alertmanager, h Holmes, slack Slack, cfg Config) *Service {
 	if cfg.QueueSize == 0 {
 		cfg.QueueSize = 10
@@ -469,12 +722,27 @@ func (f holmesFunc) Chat(ctx context.Context, request holmes.Request) (string, e
 type fakeSlack struct {
 	mu                sync.Mutex
 	reactions         []string
+	posts             []string
 	replies           []string
 	conversation      []ConversationMessage
 	conversationCalls []string
 	conversationErr   error
 	reactionErr       error
+	postErr           error
 	replyErr          error
+	rootTS            string
+	rootTSs           []string
+	replyFunc         func(context.Context, string, string, string) error
+}
+
+func (f *fakeSlack) Post(_ context.Context, channel, text string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.posts = append(f.posts, channel+":"+text)
+	if len(f.rootTSs) >= len(f.posts) {
+		return f.rootTSs[len(f.posts)-1], f.postErr
+	}
+	return f.rootTS, f.postErr
 }
 
 func (f *fakeSlack) Conversation(_ context.Context, channel, threadTS, currentTS string) ([]ConversationMessage, error) {
@@ -498,11 +766,15 @@ func (f *fakeSlack) RemoveReaction(_ context.Context, name, channel, ts string) 
 	return f.reactionErr
 }
 
-func (f *fakeSlack) Reply(_ context.Context, channel, threadTS, text string) error {
+func (f *fakeSlack) Reply(ctx context.Context, channel, threadTS, text string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.replies = append(f.replies, channel+":"+threadTS+":"+text)
-	return f.replyErr
+	replyFunc, replyErr := f.replyFunc, f.replyErr
+	f.mu.Unlock()
+	if replyFunc != nil {
+		return replyFunc(ctx, channel, threadTS, text)
+	}
+	return replyErr
 }
 
 func (f *fakeSlack) hasReaction(want string) bool {
@@ -521,6 +793,12 @@ func (f *fakeSlack) replyLog() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.replies...)
+}
+
+func (f *fakeSlack) postLog() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.posts...)
 }
 
 func (f *fakeSlack) conversationLog() []string {

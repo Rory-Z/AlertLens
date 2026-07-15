@@ -183,7 +183,7 @@ func TestTranslateRejectsIrrelevantMessages(t *testing.T) {
 }
 
 func TestWebAPIOperations(t *testing.T) {
-	requests := make(chan url.Values, 3)
+	requests := make(chan url.Values, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Error(err)
@@ -205,13 +205,19 @@ func TestWebAPIOperations(t *testing.T) {
 	if err := client.RemoveReaction(ctx, "eyes", "C1", "1"); err != nil {
 		t.Fatal(err)
 	}
+	rootTS, err := client.Post(ctx, "C1", "Scheduled investigation started: daily health")
+	if err != nil || rootTS != "2" {
+		t.Fatalf("Post() = (%q, %v)", rootTS, err)
+	}
 	if err := client.Reply(ctx, "C1", "1", "answer"); err != nil {
 		t.Fatal(err)
 	}
-	add, remove, reply := <-requests, <-requests, <-requests
+	add, remove, root, reply := <-requests, <-requests, <-requests, <-requests
 	if add.Get("name") != "eyes" || add.Get("channel") != "C1" || add.Get("timestamp") != "1" ||
-		remove.Get("name") != "eyes" || reply.Get("thread_ts") != "1" || reply.Get("text") != "answer" {
-		t.Fatalf("forms = %#v %#v %#v", add, remove, reply)
+		remove.Get("name") != "eyes" || root.Get("thread_ts") != "" ||
+		root.Get("text") != "Scheduled investigation started: daily health" ||
+		reply.Get("thread_ts") != "1" || reply.Get("text") != "answer" {
+		t.Fatalf("forms = %#v %#v %#v %#v", add, remove, root, reply)
 	}
 }
 
@@ -232,6 +238,8 @@ func TestConversationKeepsRootPriorMentionsAndAlertLensAnswers(t *testing.T) {
           {"user":"U_SELF","bot_id":"B_SELF","text":"first answer","ts":"4"},
           {"user":"U_SELF","bot_id":"B_SELF","text":"⚠️ Alertmanager enrichment failed: refused","ts":"4.1"},
           {"user":"U_SELF","bot_id":"B_SELF","text":"⚠️ Holmes request failed: reset","ts":"4.2"},
+          {"user":"U_SELF","bot_id":"B_SELF","text":"⚠️ Scheduled investigation failed: queue is full","ts":"4.3"},
+          {"user":"U_SELF","bot_id":"B_SELF","text":"AlertLens shutting down","ts":"4.4"},
           {"user":"U1","text":"<@U_SELF> current question","ts":"5"}
         ],"has_more":false,"response_metadata":{"next_cursor":""}}`)
 	}))
@@ -566,6 +574,26 @@ func TestWebAPIOperationsRetryRateLimitOnce(t *testing.T) {
 		if attempts[path] != 2 {
 			t.Fatalf("%s attempts = %d", path, attempts[path])
 		}
+	}
+}
+
+func TestPostDoesNotRetryRateLimit(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"ok":false,"error":"ratelimited"}`)
+	}))
+	defer server.Close()
+	client := &Client{api: slackapi.New("xoxb-test", slackapi.OptionAPIURL(server.URL+"/api/"))}
+
+	if _, err := client.Post(context.Background(), "C1", "Scheduled investigation started: daily"); err == nil {
+		t.Fatal("expected rate-limit error")
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("attempts = %d", attempts.Load())
 	}
 }
 

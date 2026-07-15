@@ -11,6 +11,10 @@ spec:
       {{- include "alertlens.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      {{- if .Values.scheduledInvestigations }}
+      annotations:
+        checksum/scheduled-investigations: {{ toYaml .Values.scheduledInvestigations | sha256sum }}
+      {{- end }}
       labels:
         {{- include "alertlens.selectorLabels" . | nindent 8 }}
     spec:
@@ -58,6 +62,10 @@ spec:
               value: {{ .Values.holmesResponseLanguage | quote }}
             - name: METRICS_ADDR
               value: :9090
+            {{- if .Values.scheduledInvestigations }}
+            - name: SCHEDULED_INVESTIGATIONS_FILE
+              value: /etc/alertlens/scheduled-investigations.yaml
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 9090
@@ -72,3 +80,15 @@ spec:
               port: metrics
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.scheduledInvestigations }}
+          volumeMounts:
+            - name: scheduled-investigations
+              mountPath: /etc/alertlens
+              readOnly: true
+          {{- end }}
+      {{- if .Values.scheduledInvestigations }}
+      volumes:
+        - name: scheduled-investigations
+          configMap:
+            name: {{ include "alertlens.fullname" . }}-scheduled-investigations
+      {{- end }}

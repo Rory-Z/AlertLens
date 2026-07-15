@@ -1,0 +1,3 @@
+# Load Scheduled Investigations from YAML
+
+AlertLens loads Scheduled Investigations from the YAML file named by the optional `SCHEDULED_INVESTIGATIONS_FILE` environment variable at startup; an unset variable disables the feature. The strictly decoded, mapping-root file contains `scheduledInvestigations` entries with `name`, `schedule`, and literal `prompt` fields and is limited to 1 MiB; prompts are operator-controlled plaintext configuration and are not logged by AlertLens. The Helm chart renders non-empty values into a read-only ConfigMap and includes its checksum in the Pod template so changes trigger a rollout, while non-Kubernetes deployments can provide the same file directly; runtime hot reload is not supported.

@@ -6,6 +6,7 @@ toolchain go1.25.12
 
 require (
 	github.com/prometheus/client_golang v1.23.2
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.27.0
 	go.yaml.in/yaml/v2 v2.4.2
 )

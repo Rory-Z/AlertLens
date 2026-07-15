@@ -1,0 +1,12 @@
+{{- if .Values.scheduledInvestigations }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alertlens.fullname" . }}-scheduled-investigations
+  labels:
+    {{- include "alertlens.labels" . | nindent 4 }}
+data:
+  scheduled-investigations.yaml: |
+    scheduledInvestigations:
+{{ toYaml .Values.scheduledInvestigations | indent 6 }}
+{{- end }}

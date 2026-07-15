@@ -14,6 +14,7 @@ func TestMetricsExposeBoundedLabels(t *testing.T) {
 	metrics.Reaction("add", "success")
 	metrics.Alertmanager("success", time.Second)
 	metrics.Holmes("error", 2*time.Second)
+	metrics.ScheduledInvestigation("success")
 	metrics.QueueDepth(2)
 	metrics.HolmesActive(1)
 
@@ -28,6 +29,7 @@ func TestMetricsExposeBoundedLabels(t *testing.T) {
 		"alertlens_alertmanager_request_duration_seconds": false,
 		"alertlens_holmes_requests_total":                 false,
 		"alertlens_holmes_request_duration_seconds":       false,
+		"alertlens_scheduled_investigations_total":        false,
 		"alertlens_queue_depth":                           false,
 		"alertlens_holmes_active":                         false,
 	}
