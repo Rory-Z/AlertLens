@@ -4,7 +4,7 @@ Alertmanager-first HolmesGPT RCA companion for Slack.
 
 AlertLens is designed to keep the existing **Alertmanager -> Slack** notification path as the source of truth. Alertmanager posts the authoritative alert message to Slack; AlertLens listens to that Slack message, enriches it, asks HolmesGPT for RCA, and posts concise analysis into the same thread.
 
-The firing, resolved, ad-hoc, and thread follow-up paths are implemented. See the [approved design](docs/superpowers/specs/2026-07-11-alertlens-design.md) for the complete MVP contract.
+The firing, resolved, ad-hoc, thread follow-up, and Scheduled Investigation paths are implemented. See the [approved design](docs/superpowers/specs/2026-07-11-alertlens-design.md) for the original MVP contract.
 
 Current alert behavior:
 
@@ -15,6 +15,8 @@ Current alert behavior:
 - Watchdog is handled like any other firing alert
 - a top-level `@AlertLens` asks HolmesGPT and creates a reply thread
 - a thread `@AlertLens` rebuilds context from the root, prior explicit questions, and AlertLens answers
+- each Scheduled Investigation creates its own root message, runs its literal prompt on a five-field UTC cron schedule, and replies with its result or failure in that root's thread
+- users can continue a Scheduled Investigation with ordinary thread Asks and Slack-derived history
 - Ask never queries Alertmanager; HolmesGPT can use its own configured tools when needed
 - human messages without an explicit mention are ignored
 - AlertLens keeps no session, receipt, lifecycle, or conversation state on disk
@@ -62,9 +64,33 @@ go run ./cmd/alertlens
 
 The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default. Thread context is capped by `CONVERSATION_MAX_BYTES`, which defaults to 256 KiB; there is no turn-count limit. `HOLMES_RESPONSE_LANGUAGE` (Helm: `holmesResponseLanguage`) controls the language of successful Holmes answers; it defaults to `auto`, while values such as `zh-CN` add a system-level language directive.
 
+Scheduled Investigations are optional. Set `SCHEDULED_INVESTIGATIONS_FILE` to a YAML file no larger than 1 MiB; an unset variable disables them. The mapping-root file is decoded strictly at startup, names must be unique single-line values of at most 80 characters, schedules use five-field cron in UTC, and prompts are passed literally to Holmes:
+
+```yaml
+scheduledInvestigations:
+  - name: daily platform health
+    schedule: "0 1 * * *"
+    prompt: |
+      Investigate platform health and summarize anomalies and next checks.
+```
+
+Invalid configuration stops startup. There is no hot reload, startup run, missed-run catch-up, or overlap suppression. Scheduled runs share the normal in-memory queue and `HOLMESGPT_MAX_CONCURRENCY` limit.
+
 ## Deployment
 
 Create a dedicated Secret whose keys are `bot-token` and `app-token`; do not put either token in Helm values. AlertLens is stateless and the chart does not create a PVC.
+
+Configure schedules directly in Helm values. The chart renders non-empty values as a read-only YAML ConfigMap, sets `SCHEDULED_INVESTIGATIONS_FILE`, and adds a checksum to the Pod template so changes roll the single replica:
+
+```yaml
+scheduledInvestigations:
+  - name: daily platform health
+    schedule: "0 1 * * *"
+    prompt: |
+      Investigate platform health and summarize anomalies and next checks.
+```
+
+Keep the Deployment at one replica. Multiple replicas independently fire every schedule and are not supported until AlertLens gains broader active-active coordination.
 
 The default NetworkPolicy permits DNS and any destination on TCP 443; native Kubernetes NetworkPolicy cannot enforce Slack FQDNs. Use a CNI FQDN policy or egress proxy when strict Slack-only HTTPS is required. Add the namespaces and ports used by HolmesGPT and Alertmanager:
 

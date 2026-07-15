@@ -1,0 +1,3 @@
+# AlertLens owns Scheduled Investigation timing
+
+AlertLens schedules each configured Scheduled Investigation inside its long-running process rather than relying on Kubernetes CronJobs. Schedules use strict five-field cron in UTC; runs share the existing Holmes queue and concurrency limit, do not start immediately on process startup, do not catch up missed triggers, and do not suppress rare overlaps. This keeps the capability consistent across deployment platforms while preserving the current stateless, single-replica contract; multiple replicas would duplicate runs and require a broader active-active design.

@@ -98,6 +98,11 @@ func (c *Client) Reply(ctx context.Context, channel, threadTS, text string) erro
 	})
 }
 
+func (c *Client) Post(ctx context.Context, channel, text string) (string, error) {
+	_, timestamp, err := c.api.PostMessageContext(ctx, channel, slackapi.MsgOptionText(text, false))
+	return timestamp, err
+}
+
 func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS string) ([]service.ConversationMessage, error) {
 	var all []slackapi.Message
 	cursor := ""
@@ -145,7 +150,9 @@ func failureReply(text string) bool {
 	const legacyAlertmanagerFailureReplyPrefix = "⚠️ Alertmanager enrichment failed:"
 	return strings.HasPrefix(text, service.AlertmanagerFailureReplyPrefix) ||
 		strings.HasPrefix(text, legacyAlertmanagerFailureReplyPrefix) ||
-		strings.HasPrefix(text, service.HolmesFailureReplyPrefix)
+		strings.HasPrefix(text, service.HolmesFailureReplyPrefix) ||
+		strings.HasPrefix(text, service.ScheduledFailureReplyPrefix) ||
+		text == service.ShutdownReply
 }
 
 func messageText(message slackapi.Message) string {

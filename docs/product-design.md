@@ -1,7 +1,7 @@
 # AlertLens Product Design
 
 Date: 2026-07-08
-Updated: 2026-07-13
+Updated: 2026-07-15
 
 ## Summary
 
@@ -11,6 +11,7 @@ investigation to Alertmanager notifications already delivered to Slack.
 ```text
 Alertmanager -> Slack       authoritative alert delivery
 Slack Events -> AlertLens   investigation trigger and thread UX
+UTC cron -> AlertLens       recurring read-only investigation trigger
 AlertLens -> Slack          RCA, Ask answers, failures, and reactions
 ```
 
@@ -34,7 +35,7 @@ AlertLens does not keep:
   conversation files;
 - cooldowns or alert-episode suppression;
 - Watchdog-specific metrics;
-- a web UI, GitOps, PR creation, scheduled mutable jobs, or arbitrary shell;
+- a web UI, GitOps, PR creation, remediation jobs, or arbitrary shell;
 - Alertmanager webhook ingestion or active-active delivery guarantees.
 
 ## Why Slack Remains the Source of Conversation
@@ -103,6 +104,28 @@ Language. Its default, `auto`, leaves language selection to Holmes; any other
 value adds a system-level response-language directive. AlertLens warnings and
 failure replies remain unchanged.
 
+## Scheduled Investigation Semantics
+
+Each configured Scheduled Investigation has an installation-unique name, a
+strict five-field cron schedule interpreted in UTC, and a literal prompt. At a
+trigger, AlertLens first creates `Scheduled investigation started: <name>` in
+the Monitored Channel. If the root cannot be created, Holmes is not called. The
+Holmes result or any subsequent reportable failure is posted in that root's
+thread, and the root moves from `hourglass_flowing_sand` to
+`white_check_mark` or `x`.
+
+Scheduled Investigations do not query Alertmanager or perform Active Alert
+Verification. They use the same read-only Holmes constraint, response language,
+bounded Slack output, in-memory queue, and concurrency limit as other requests.
+Users may continue in the created thread with ordinary Ask; follow-up context is
+reconstructed from Slack and does not re-inject the configured prompt.
+
+AlertLens owns schedule timing in its long-running process. It does not run a
+schedule immediately at startup, catch up triggers missed while stopped, retry a
+failed run, or suppress a rare overlap. The supported single replica avoids
+duplicate triggers; active-active scheduling requires a broader coordination
+design.
+
 ## Noise and Failure Policy
 
 The reaction sequence makes state visible without extra channel messages:
@@ -125,6 +148,11 @@ Watchdog is an ordinary firing alert when routed to AlertLens. A dead man's
 switch must not depend on the component whose path it is intended to test, so
 AlertLens exposes no self-referential Watchdog heartbeat metric.
 
+Scheduled runs expose only the bounded `outcome` label (`success` or `failed`)
+on `alertlens_scheduled_investigations_total`; names and prompts are not metric
+labels. Logs identify a run by name and schedule without logging its prompt or
+Holmes answer.
+
 ## Reliability Model
 
 AlertLens deliberately accepts rare duplicate work after Slack redelivery and
@@ -137,6 +165,7 @@ Reliability comes from a small failure surface:
 - independent work across Slack threads;
 - in-process serialization within one thread;
 - bounded Alertmanager retry and Holmes concurrency;
+- in-process UTC scheduling for configured recurring investigations;
 - graceful draining on shutdown;
 - Alertmanager-to-Slack delivery remains independent.
 
@@ -153,6 +182,9 @@ RBAC enforce read-only investigation.
 The Kubernetes deployment is stateless, non-root, read-only, and has no
 service-account token or PVC. Secrets are referenced from an existing Secret.
 NetworkPolicy limits egress to DNS, Slack HTTPS, Alertmanager, and HolmesGPT.
+Scheduled prompts are operator-controlled plaintext configuration, rendered by
+the chart into a read-only ConfigMap rather than a Secret. The application reads
+the strictly decoded YAML file once at startup and rejects files over 1 MiB.
 
 ## MVP Behaviors
 
@@ -196,4 +228,13 @@ And posts the answer in that thread
 Given AlertLens is unavailable
 When Alertmanager sends an alert
 Then operators still receive the authoritative Slack notification
+```
+
+```gherkin
+Given a valid Scheduled Investigation reaches its UTC cron time
+When AlertLens triggers the run
+Then AlertLens creates a root message in the Monitored Channel
+And asks Holmes without querying Alertmanager
+And posts the result or reportable failure in the root thread
+And users can continue there with ordinary Ask and Slack-derived history
 ```

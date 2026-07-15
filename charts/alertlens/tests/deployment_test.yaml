@@ -38,3 +38,35 @@ tests:
           content:
             name: HOLMES_RESPONSE_LANGUAGE
             value: zh-CN
+  - it: mounts Scheduled Investigations and rolls out on configuration changes
+    set:
+      slack.existingSecret: alertlens-slack
+      slack.alertChannel: C1
+      alertmanagerURL: http://alertmanager:9093
+      holmesURL: http://holmes:5050
+      scheduledInvestigations:
+        - name: daily health
+          schedule: "0 1 * * *"
+          prompt: |
+            Investigate the daily health of the platform.
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/scheduled-investigations"]
+          pattern: ^[a-f0-9]{64}$
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SCHEDULED_INVESTIGATIONS_FILE
+            value: /etc/alertlens/scheduled-investigations.yaml
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: scheduled-investigations
+            mountPath: /etc/alertlens
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: scheduled-investigations
+            configMap:
+              name: RELEASE-NAME-alertlens-scheduled-investigations

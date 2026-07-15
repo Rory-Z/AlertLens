@@ -37,6 +37,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	metrics := observability.New()
 	slackClient := slackadapter.New(cfg.SlackBotToken, cfg.SlackAppToken, cfg.MonitoredChannel)
+	scheduledInvestigations := make([]service.ScheduledInvestigation, len(cfg.ScheduledInvestigations))
+	for i, investigation := range cfg.ScheduledInvestigations {
+		scheduledInvestigations[i] = service.ScheduledInvestigation{
+			Name: investigation.Name, Schedule: investigation.Schedule, Prompt: investigation.Prompt,
+		}
+	}
 	worker := service.New(
 		alertmanager.New(cfg.AlertmanagerURL, cfg.AlertmanagerTimeout),
 		holmes.New(cfg.HolmesURL, cfg.HolmesTimeout),
@@ -46,6 +52,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			AlertPayloadMaxBytes: cfg.AlertPayloadMaxBytes,
 			RunbookMaxBytes:      cfg.RunbookMaxBytes, ConversationMaxBytes: cfg.ConversationMaxBytes,
 			SlackOutputMaxChars: cfg.SlackOutputMaxChars, HolmesResponseLanguage: cfg.HolmesResponseLanguage,
+			MonitoredChannel: cfg.MonitoredChannel, ScheduledInvestigations: scheduledInvestigations,
 		},
 		metrics,
 	)

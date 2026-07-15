@@ -13,7 +13,7 @@ The single Slack channel assigned to an AlertLens installation. Automatic alert 
 _Avoid_: Monitored channels, channel allowlist, workspace, global channel
 
 **Investigation Workspace**:
-The Slack thread where responders read AlertLens investigation results and continue with Ask. Alertmanager independently delivers the same alert to PagerDuty, which owns paging, acknowledgement, and resolution; its incident is not a second AlertLens conversation surface.
+The Slack thread where responders read AlertLens investigation results and continue with Ask. For an Automatic Investigation, Alertmanager independently delivers the same alert to PagerDuty, which owns paging, acknowledgement, and resolution; its incident is not a second AlertLens conversation surface.
 _Avoid_: PagerDuty conversation, dual-channel RCA
 
 **Alert Identity**:
@@ -51,6 +51,10 @@ _Avoid_: Alert Identity as conversation ID
 **Automatic Investigation**:
 An RCA started for each notification whose marker has `status=firing` after Active Alert Verification succeeds. It calls Holmes with the notification event's root message and Verified Alert Snapshot, which may span multiple Notification Groups. The root identifies the group that triggered this investigation. Automatic Investigation does not read Slack Thread History or couple its query to Alertmanager `group_by` fields.
 _Avoid_: Cooldown, lifecycle suppression, stored alert episode
+
+**Scheduled Investigation**:
+A recurring investigation identified by an installation-unique name and defined by its own schedule and prompt; it has no Alert Identity and does not perform Active Alert Verification. Each trigger starts a run by creating an Investigation Workspace in the Monitored Channel; every subsequent result or reportable failure is delivered there, where users may continue with ordinary Asks and Slack-derived Conversation Context.
+_Avoid_: CronJob, Scheduled Investigation ID, scheduled Ask, scheduled job
 
 **Watchdog**:
 An ordinary firing alert if it reaches a Monitored Channel. AlertLens has no Watchdog-specific branch or heartbeat metrics; an end-to-end dead man's switch must be observed by an independent monitoring path.

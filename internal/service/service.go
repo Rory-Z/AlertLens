@@ -3,8 +3,12 @@ package service
 import (
 	"context"
 	"hash/fnv"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/robfig/cron/v3"
 
 	"github.com/emqx/alertlens/internal/alertmanager"
 	"github.com/emqx/alertlens/internal/holmes"
@@ -14,8 +18,11 @@ import (
 
 const (
 	defaultDrainTimeout            = 25 * time.Second
+	defaultShutdownReplyTimeout    = 5 * time.Second
 	AlertmanagerFailureReplyPrefix = "⚠️ Alertmanager verification failed:"
 	HolmesFailureReplyPrefix       = "⚠️ Holmes request failed:"
+	ScheduledFailureReplyPrefix    = "⚠️ Scheduled investigation failed:"
+	ShutdownReply                  = "AlertLens shutting down"
 )
 
 type Event struct {
@@ -37,23 +44,37 @@ type Holmes interface {
 type Slack interface {
 	AddReaction(context.Context, string, string, string) error
 	RemoveReaction(context.Context, string, string, string) error
+	Post(context.Context, string, string) (string, error)
 	Reply(context.Context, string, string, string) error
 	Conversation(context.Context, string, string, string) ([]ConversationMessage, error)
 }
 
+type ScheduledInvestigation struct {
+	Name     string
+	Schedule string
+	Prompt   string
+}
+
 type Config struct {
-	QueueSize              int
-	Workers                int
-	AlertPayloadMaxBytes   int
-	RunbookMaxBytes        int
-	ConversationMaxBytes   int
-	SlackOutputMaxChars    int
-	HolmesResponseLanguage string
+	QueueSize               int
+	Workers                 int
+	AlertPayloadMaxBytes    int
+	RunbookMaxBytes         int
+	ConversationMaxBytes    int
+	SlackOutputMaxChars     int
+	HolmesResponseLanguage  string
+	MonitoredChannel        string
+	ScheduledInvestigations []ScheduledInvestigation
 }
 
 type work struct {
-	event    Event
-	identity marker.Alert
+	event                  Event
+	identity               marker.Alert
+	scheduledInvestigation *ScheduledInvestigation
+}
+
+type replyContext struct {
+	context.Context
 }
 
 type Service struct {
@@ -118,9 +139,59 @@ func (s *Service) Submit(ctx context.Context, event Event) bool {
 	}
 }
 
+func (s *Service) SubmitScheduled(ctx context.Context, investigation ScheduledInvestigation) bool {
+	rootTS, err := s.slack.Post(ctx, s.config.MonitoredChannel, "Scheduled investigation started: "+investigation.Name)
+	if err != nil || rootTS == "" {
+		s.metrics.ScheduledInvestigation("failed")
+		slog.Error("scheduled investigation failed", "name", investigation.Name, "schedule", investigation.Schedule)
+		return false
+	}
+	event := Event{Channel: s.config.MonitoredChannel, TS: rootTS}
+	s.intakeMu.RLock()
+	if !s.accepting {
+		s.intakeMu.RUnlock()
+		s.failScheduledIntake(ctx, event, investigation, "AlertLens is shutting down")
+		return false
+	}
+	select {
+	case s.queue <- work{event: event, scheduledInvestigation: &investigation}:
+		s.intakeMu.RUnlock()
+		s.metrics.QueueDepth(len(s.queue))
+		return true
+	default:
+		s.intakeMu.RUnlock()
+		s.failScheduledIntake(ctx, event, investigation, "work queue is full")
+		return false
+	}
+}
+
+func (s *Service) failScheduledIntake(
+	ctx context.Context, event Event, investigation ScheduledInvestigation, reason string,
+) {
+	_ = s.slack.Reply(ctx, event.Channel, event.TS, truncateSlack(
+		ScheduledFailureReplyPrefix+" "+reason, s.config.SlackOutputMaxChars))
+	s.transition(ctx, event, "", "x")
+	s.metrics.ScheduledInvestigation("failed")
+	slog.Error("scheduled investigation failed", "name", investigation.Name, "schedule", investigation.Schedule)
+}
+
 func (s *Service) Run(ctx context.Context) {
 	workCtx, cancelWork := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelWork()
+	var forcedReplyContext atomic.Pointer[replyContext]
+	forcedReplyContext.Store(&replyContext{Context: context.Background()})
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	scheduler := cron.New(cron.WithLocation(time.UTC), cron.WithParser(parser))
+	for _, investigation := range s.config.ScheduledInvestigations {
+		investigation := investigation
+		if _, err := scheduler.AddFunc(investigation.Schedule, func() {
+			s.SubmitScheduled(workCtx, investigation)
+		}); err != nil {
+			slog.Error("scheduled investigation configuration failed",
+				"name", investigation.Name, "schedule", investigation.Schedule)
+		}
+	}
+	scheduler.Start()
 	var workers sync.WaitGroup
 	workers.Add(s.config.Workers)
 	for range s.config.Workers {
@@ -128,7 +199,8 @@ func (s *Service) Run(ctx context.Context) {
 			defer workers.Done()
 			for item := range s.queue {
 				if workCtx.Err() != nil {
-					return
+					s.failScheduledShutdown(forcedReplyContext.Load().Context, item)
+					continue
 				}
 				s.metrics.QueueDepth(len(s.queue))
 				s.handle(workCtx, item)
@@ -137,15 +209,17 @@ func (s *Service) Run(ctx context.Context) {
 	}
 
 	<-ctx.Done()
-	s.intakeMu.Lock()
-	if s.accepting {
-		s.accepting = false
-		close(s.queue)
-	}
-	s.intakeMu.Unlock()
+	schedulerDone := scheduler.Stop()
 
 	done := make(chan struct{})
 	go func() {
+		<-schedulerDone.Done()
+		s.intakeMu.Lock()
+		if s.accepting {
+			s.accepting = false
+			close(s.queue)
+		}
+		s.intakeMu.Unlock()
 		workers.Wait()
 		close(done)
 	}()
@@ -154,12 +228,31 @@ func (s *Service) Run(ctx context.Context) {
 	select {
 	case <-done:
 	case <-timer.C:
+		replyCtx, cancelReplies := context.WithTimeout(context.Background(), defaultShutdownReplyTimeout)
+		forcedReplyContext.Store(&replyContext{Context: replyCtx})
 		cancelWork()
 		<-done
+		cancelReplies()
 	}
 }
 
+func (s *Service) failScheduledShutdown(ctx context.Context, item work) {
+	if item.scheduledInvestigation == nil {
+		return
+	}
+	_ = s.slack.Reply(ctx, item.event.Channel, item.event.TS,
+		truncateSlack(ShutdownReply, s.config.SlackOutputMaxChars))
+	s.transition(ctx, item.event, "", "x")
+	s.metrics.ScheduledInvestigation("failed")
+	slog.Error("scheduled investigation failed",
+		"name", item.scheduledInvestigation.Name, "schedule", item.scheduledInvestigation.Schedule)
+}
+
 func (s *Service) handle(ctx context.Context, item work) {
+	if item.scheduledInvestigation != nil {
+		s.handleScheduled(ctx, item.event, *item.scheduledInvestigation)
+		return
+	}
 	if item.event.Mention {
 		s.handleAsk(ctx, item.event)
 		return
@@ -196,6 +289,28 @@ func (s *Service) handle(ctx context.Context, item work) {
 		return
 	}
 	s.metrics.Event("firing")
+}
+
+func (s *Service) handleScheduled(ctx context.Context, event Event, investigation ScheduledInvestigation) {
+	unlock := s.lockThread(event.Channel, event.TS)
+	defer unlock()
+	request := holmes.Request{
+		Ask:                    investigation.Prompt,
+		AdditionalSystemPrompt: scheduledHolmesSystemPrompt(s.config.HolmesResponseLanguage),
+		RequestSource:          "scheduled_investigation",
+		SourceRef:              "schedule:" + investigation.Name,
+		ConversationID:         threadLockKey(event.Channel, event.TS),
+	}
+	outcome := "failed"
+	if s.runHolmesFrom(ctx, event, event.TS, request, "") {
+		outcome = "success"
+	}
+	s.metrics.ScheduledInvestigation(outcome)
+	if outcome == "success" {
+		slog.Info("scheduled investigation completed", "name", investigation.Name, "schedule", investigation.Schedule)
+	} else {
+		slog.Error("scheduled investigation failed", "name", investigation.Name, "schedule", investigation.Schedule)
+	}
 }
 
 func (s *Service) failVerification(ctx context.Context, event Event, reason string) {
@@ -244,7 +359,13 @@ func (s *Service) handleAsk(ctx context.Context, event Event) {
 }
 
 func (s *Service) runHolmes(ctx context.Context, event Event, replyThreadTS string, request holmes.Request) bool {
-	s.transition(ctx, event, "eyes", "hourglass_flowing_sand")
+	return s.runHolmesFrom(ctx, event, replyThreadTS, request, "eyes")
+}
+
+func (s *Service) runHolmesFrom(
+	ctx context.Context, event Event, replyThreadTS string, request holmes.Request, currentReaction string,
+) bool {
+	s.transition(ctx, event, currentReaction, "hourglass_flowing_sand")
 	s.metrics.HolmesActive(1)
 	started := time.Now()
 	answer, err := s.holmes.Chat(ctx, request)
@@ -252,9 +373,17 @@ func (s *Service) runHolmes(ctx context.Context, event Event, replyThreadTS stri
 	if err != nil {
 		s.metrics.Holmes("error", time.Since(started))
 		s.metrics.Event("failed")
-		_ = s.slack.Reply(ctx, event.Channel, replyThreadTS,
-			truncateSlack(HolmesFailureReplyPrefix+" "+sanitize(err.Error()), s.config.SlackOutputMaxChars))
-		s.transition(ctx, event, "hourglass_flowing_sand", "x")
+		replyCtx := ctx
+		message := HolmesFailureReplyPrefix + " " + sanitize(err.Error())
+		cancelReply := func() {}
+		if ctx.Err() != nil {
+			replyCtx, cancelReply = context.WithTimeout(context.Background(), defaultShutdownReplyTimeout)
+			message = ShutdownReply
+		}
+		_ = s.slack.Reply(replyCtx, event.Channel, replyThreadTS,
+			truncateSlack(message, s.config.SlackOutputMaxChars))
+		s.transition(replyCtx, event, "hourglass_flowing_sand", "x")
+		cancelReply()
 		return false
 	}
 	s.metrics.Holmes("success", time.Since(started))

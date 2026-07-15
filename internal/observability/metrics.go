@@ -9,15 +9,16 @@ import (
 )
 
 type Metrics struct {
-	registry             *prometheus.Registry
-	events               *prometheus.CounterVec
-	reactions            *prometheus.CounterVec
-	alertmanagerRequests *prometheus.CounterVec
-	alertmanagerDuration prometheus.Histogram
-	holmesRequests       *prometheus.CounterVec
-	holmesDuration       prometheus.Histogram
-	queueDepth           prometheus.Gauge
-	holmesActive         prometheus.Gauge
+	registry                *prometheus.Registry
+	events                  *prometheus.CounterVec
+	reactions               *prometheus.CounterVec
+	alertmanagerRequests    *prometheus.CounterVec
+	alertmanagerDuration    prometheus.Histogram
+	holmesRequests          *prometheus.CounterVec
+	holmesDuration          prometheus.Histogram
+	scheduledInvestigations *prometheus.CounterVec
+	queueDepth              prometheus.Gauge
+	holmesActive            prometheus.Gauge
 }
 
 func New() *Metrics {
@@ -41,6 +42,9 @@ func New() *Metrics {
 		holmesDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "alertlens_holmes_request_duration_seconds", Help: "Holmes request duration.",
 		}),
+		scheduledInvestigations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "alertlens_scheduled_investigations_total", Help: "Scheduled Investigation runs by bounded outcome.",
+		}, []string{"outcome"}),
 		queueDepth: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "alertlens_queue_depth", Help: "Current queued work items.",
 		}),
@@ -51,7 +55,7 @@ func New() *Metrics {
 	m.registry.MustRegister(
 		m.events, m.reactions,
 		m.alertmanagerRequests, m.alertmanagerDuration,
-		m.holmesRequests, m.holmesDuration,
+		m.holmesRequests, m.holmesDuration, m.scheduledInvestigations,
 		m.queueDepth, m.holmesActive,
 	)
 	return m
@@ -77,6 +81,10 @@ func (m *Metrics) Alertmanager(outcome string, duration time.Duration) {
 func (m *Metrics) Holmes(outcome string, duration time.Duration) {
 	m.holmesRequests.WithLabelValues(outcome).Inc()
 	m.holmesDuration.Observe(duration.Seconds())
+}
+
+func (m *Metrics) ScheduledInvestigation(outcome string) {
+	m.scheduledInvestigations.WithLabelValues(outcome).Inc()
 }
 
 func (m *Metrics) QueueDepth(depth int)       { m.queueDepth.Set(float64(depth)) }

@@ -1,0 +1,24 @@
+suite: Scheduled Investigations ConfigMap
+templates:
+  - templates/configmap.yaml
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders mapping-root YAML with literal prompts
+    set:
+      scheduledInvestigations:
+        - name: daily health
+          schedule: "0 1 * * *"
+          prompt: |
+            Investigate line one.
+            Investigate line two.
+    asserts:
+      - equal:
+          path: kind
+          value: ConfigMap
+      - matchRegex:
+          path: data["scheduled-investigations.yaml"]
+          pattern: |-
+            (?s)^scheduledInvestigations:\n.*name: daily health.*prompt: \|.*Investigate line one\.\n.*Investigate line two\.\n.*schedule: 0 1 \* \* \*\n?$
