@@ -78,17 +78,16 @@ type replyContext struct {
 }
 
 type Service struct {
-	alertmanager         Alertmanager
-	holmes               Holmes
-	slack                Slack
-	config               Config
-	drainTimeout         time.Duration
-	shutdownReplyTimeout time.Duration
-	queue                chan work
-	intakeMu             sync.RWMutex
-	accepting            bool
-	threadLocks          [64]sync.Mutex
-	metrics              *observability.Metrics
+	alertmanager Alertmanager
+	holmes       Holmes
+	slack        Slack
+	config       Config
+	drainTimeout time.Duration
+	queue        chan work
+	intakeMu     sync.RWMutex
+	accepting    bool
+	threadLocks  [64]sync.Mutex
+	metrics      *observability.Metrics
 }
 
 func New(alertmanager Alertmanager, holmes Holmes, slack Slack, config Config, metrics *observability.Metrics) *Service {
@@ -96,15 +95,14 @@ func New(alertmanager Alertmanager, holmes Holmes, slack Slack, config Config, m
 		metrics = observability.New()
 	}
 	return &Service{
-		alertmanager:         alertmanager,
-		holmes:               holmes,
-		slack:                slack,
-		config:               config,
-		drainTimeout:         defaultDrainTimeout,
-		shutdownReplyTimeout: defaultShutdownReplyTimeout,
-		queue:                make(chan work, config.QueueSize),
-		metrics:              metrics,
-		accepting:            true,
+		alertmanager: alertmanager,
+		holmes:       holmes,
+		slack:        slack,
+		config:       config,
+		drainTimeout: defaultDrainTimeout,
+		queue:        make(chan work, config.QueueSize),
+		metrics:      metrics,
+		accepting:    true,
 	}
 }
 
@@ -230,7 +228,7 @@ func (s *Service) Run(ctx context.Context) {
 	select {
 	case <-done:
 	case <-timer.C:
-		replyCtx, cancelReplies := context.WithTimeout(context.Background(), s.shutdownReplyTimeout)
+		replyCtx, cancelReplies := context.WithTimeout(context.Background(), defaultShutdownReplyTimeout)
 		forcedReplyContext.Store(&replyContext{Context: replyCtx})
 		cancelWork()
 		<-done
@@ -379,7 +377,7 @@ func (s *Service) runHolmesFrom(
 		message := HolmesFailureReplyPrefix + " " + sanitize(err.Error())
 		cancelReply := func() {}
 		if ctx.Err() != nil {
-			replyCtx, cancelReply = context.WithTimeout(context.Background(), s.shutdownReplyTimeout)
+			replyCtx, cancelReply = context.WithTimeout(context.Background(), defaultShutdownReplyTimeout)
 			message = ShutdownReply
 		}
 		_ = s.slack.Reply(replyCtx, event.Channel, replyThreadTS,
