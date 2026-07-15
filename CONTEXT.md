@@ -13,7 +13,7 @@ A Slack channel explicitly configured for AlertLens. Automatic alert handling an
 _Avoid_: Workspace, global channel
 
 **Investigation Workspace**:
-The Slack thread where responders read AlertLens investigation results and continue with Ask. PagerDuty may page responders for the same alert, but its incident is not a second AlertLens conversation surface.
+The Slack thread where responders read AlertLens investigation results and continue with Ask. Alertmanager independently delivers the same alert to PagerDuty, which owns paging, acknowledgement, and resolution; its incident is not a second AlertLens conversation surface.
 _Avoid_: PagerDuty conversation, dual-channel RCA
 
 **Alert Identity**:
