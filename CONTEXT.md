@@ -36,6 +36,10 @@ _Avoid_: Best-effort enrichment, Slack-only confirmation
 The bounded matching-alert data passed to Holmes after Active Alert Verification. It always preserves the successful verification fact and Alert Identity; instance details may be truncated without invalidating verification.
 _Avoid_: Full Alertmanager response, unverified enrichment
 
+**Inline Runbook**:
+Troubleshooting guidance embedded directly in an alert and available as part of its Verified Alert Snapshot.
+_Avoid_: Runbook URL, Holmes Skill
+
 **Thread History**:
 The messages currently available in a Slack thread. Content deleted, edited away, or expired under Slack retention is not part of the history AlertLens can continue from.
 _Avoid_: Thread memory
