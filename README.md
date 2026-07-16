@@ -100,7 +100,7 @@ networkPolicy:
     - namespace: victoria
       ports: [9093]
     - namespace: holmes
-      ports: [80]
+      ports: [5050]
 ```
 
 For the FlowMQ dev cluster, use `~/.kube/flowmq-dev-tiger.yaml` as the
@@ -110,6 +110,9 @@ kubeconfig. The service URLs are:
 http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093
 http://holmes-holmes.holmes.svc:80
 ```
+
+NetworkPolicy ports are destination Pod ports, so Holmes uses its `5050`
+target port even though clients use Service port `80`.
 
 Namespace selectors keep this access stable when internal endpoint IPs change. A real smoke deployment also needs an image that the cluster can pull and a separate Slack App. The dev E2E below shares Vigil's dev channel, so duplicate replies and reactions are expected.
 
