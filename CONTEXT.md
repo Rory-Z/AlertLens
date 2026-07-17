@@ -72,6 +72,10 @@ _Avoid_: Alert follow-up session, marker-specific Ask, Alertmanager-enriched Ask
 A thread reply containing a sanitized and length-bounded failure reason. Active Alert Verification distinguishes a query's actual failure reason from an explicit zero-match reason; a Holmes failure reports its actual reason, and each case marks the operation with an `x` reaction.
 _Avoid_: Generic failure message, fixed timeout reason, reaction-only failure
 
+**Holmes Answer**:
+A successful investigation result returned by Holmes and delivered to an Investigation Workspace. It may span consecutive Slack replies but is complete only when every part is delivered.
+_Avoid_: Slack message, truncated answer, Failure Reply
+
 **Holmes Response Language**:
 The language policy for successful Holmes answers, expressed as `auto` or any non-empty language tag. `auto` is the default and leaves the language to Holmes. It does not govern AlertLens warnings, failure replies, or truncation notices.
 _Avoid_: AlertLens language, interface locale

@@ -188,7 +188,8 @@ shutdown for up to 25 seconds.
   dropping verification fields.
 - Inline runbooks: 8 KiB.
 - Conversation context: 256 KiB, with no turn limit.
-- Slack output: 2500 characters with a truncation notice.
+- Slack replies: 4000 Unicode characters each. Holmes Answers are numbered and
+  split across at most ten replies; Failure Replies remain one bounded reply.
 
 Slack text, Alertmanager content, runbooks, and Holmes output are untrusted.
 They are structurally delimited and sanitized for credential patterns.

@@ -238,6 +238,7 @@ func TestConversationKeepsRootPriorMentionsAndAlertLensAnswers(t *testing.T) {
           {"user":"U_SELF","bot_id":"B_SELF","text":"first answer","ts":"4"},
           {"user":"U_SELF","bot_id":"B_SELF","text":"⚠️ Alertmanager enrichment failed: refused","ts":"4.1"},
           {"user":"U_SELF","bot_id":"B_SELF","text":"⚠️ Holmes request failed: reset","ts":"4.2"},
+          {"user":"U_SELF","bot_id":"B_SELF","text":"⚠️ Holmes answer delivery failed: part 2 of 3","ts":"4.25"},
           {"user":"U_SELF","bot_id":"B_SELF","text":"⚠️ Scheduled investigation failed: queue is full","ts":"4.3"},
           {"user":"U_SELF","bot_id":"B_SELF","text":"AlertLens shutting down","ts":"4.4"},
           {"user":"U1","text":"<@U_SELF> current question","ts":"5"}
@@ -385,7 +386,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 		client,
 		service.Config{
 			QueueSize: 10, Workers: 1, AlertPayloadMaxBytes: 32768,
-			RunbookMaxBytes: 8192, ConversationMaxBytes: 256 << 10, SlackOutputMaxChars: 2500,
+			RunbookMaxBytes: 8192, ConversationMaxBytes: 256 << 10,
 		},
 		nil,
 	)
