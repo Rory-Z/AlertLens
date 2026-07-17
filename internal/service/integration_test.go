@@ -382,6 +382,19 @@ func TestReplyFailureEndsWithFailureReaction(t *testing.T) {
 }
 
 func TestHolmesAnswerDelivery(t *testing.T) {
+	t.Run("CRLF paragraph boundary", func(t *testing.T) {
+		slack := &fakeSlack{}
+		answer := strings.Repeat("a", 3900) + "\r\n\r\n" + strings.Repeat("b", 50) + "\n" + strings.Repeat("c", 100)
+		service := startService(t, activeAlertmanager("A", "ns"),
+			holmesFunc(func(context.Context, holmes.Request) (string, error) { return answer, nil }), slack, Config{})
+		service.Submit(context.Background(), firingEvent("1", "A", "ns"))
+		waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:1") })
+		replies := slack.replyLog()
+		if len(replies) != 2 || !strings.HasSuffix(replies[0], "\r\n\r\n") {
+			t.Fatalf("replies = %#v", replies)
+		}
+	})
+
 	t.Run("all parts", func(t *testing.T) {
 		slack := &fakeSlack{}
 		service := startService(t, activeAlertmanager("A", "ns"),

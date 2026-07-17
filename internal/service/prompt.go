@@ -190,7 +190,14 @@ func splitSlackContent(runes []rune, maxChars int) []string {
 	for len(runes) > maxChars {
 		cut := maxChars
 		for index := maxChars; index > 1; index-- {
-			if runes[index-2] == '\n' && runes[index-1] == '\n' {
+			if runes[index-1] != '\n' {
+				continue
+			}
+			previous := index - 2
+			if runes[previous] == '\r' {
+				previous--
+			}
+			if previous >= 0 && runes[previous] == '\n' {
 				cut = index
 				break
 			}
