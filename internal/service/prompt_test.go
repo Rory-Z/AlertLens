@@ -58,9 +58,29 @@ func TestSanitizeAndTruncateSlack(t *testing.T) {
 			t.Fatalf("sanitized output contains %q: %q", secret, got)
 		}
 	}
-	truncated := truncateSlack(strings.Repeat("你好", 20), 32)
-	if len([]rune(truncated)) != 32 || !strings.Contains(truncated, "truncated by AlertLens") {
+	truncated := truncateSlack(strings.Repeat("你好", slackMessageMaxChars))
+	if len([]rune(truncated)) != slackMessageMaxChars || !strings.Contains(truncated, "truncated by AlertLens") {
 		t.Fatalf("truncated output = %q (%d runes)", truncated, len([]rune(truncated)))
+	}
+}
+
+func TestSplitSlackPreservesAndNumbersLongAnswers(t *testing.T) {
+	text := strings.Repeat("甲", 3900) + "\n\n" + strings.Repeat("乙", 200)
+	parts := splitSlack(text)
+	if len(parts) != 2 {
+		t.Fatalf("parts = %d", len(parts))
+	}
+	if !strings.HasSuffix(parts[0], "\n\n") {
+		t.Fatalf("first part did not use paragraph boundary: %q", parts[0][len(parts[0])-20:])
+	}
+	for _, part := range parts {
+		if len([]rune(part)) > slackMessageMaxChars {
+			t.Fatalf("part has %d characters", len([]rune(part)))
+		}
+	}
+	got := strings.TrimPrefix(parts[0], "(1/2) ") + strings.TrimPrefix(parts[1], "(2/2) ")
+	if got != text {
+		t.Fatal("split answer did not preserve content")
 	}
 }
 

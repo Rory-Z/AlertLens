@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"sync"
@@ -17,12 +18,13 @@ import (
 )
 
 const (
-	defaultDrainTimeout            = 25 * time.Second
-	defaultShutdownReplyTimeout    = 5 * time.Second
-	AlertmanagerFailureReplyPrefix = "⚠️ Alertmanager verification failed:"
-	HolmesFailureReplyPrefix       = "⚠️ Holmes request failed:"
-	ScheduledFailureReplyPrefix    = "⚠️ Scheduled investigation failed:"
-	ShutdownReply                  = "AlertLens shutting down"
+	defaultDrainTimeout                    = 25 * time.Second
+	defaultShutdownReplyTimeout            = 5 * time.Second
+	AlertmanagerFailureReplyPrefix         = "⚠️ Alertmanager verification failed:"
+	HolmesFailureReplyPrefix               = "⚠️ Holmes request failed:"
+	HolmesAnswerDeliveryFailureReplyPrefix = "⚠️ Holmes answer delivery failed:"
+	ScheduledFailureReplyPrefix            = "⚠️ Scheduled investigation failed:"
+	ShutdownReply                          = "AlertLens shutting down"
 )
 
 type Event struct {
@@ -61,7 +63,6 @@ type Config struct {
 	AlertPayloadMaxBytes    int
 	RunbookMaxBytes         int
 	ConversationMaxBytes    int
-	SlackOutputMaxChars     int
 	HolmesResponseLanguage  string
 	MonitoredChannel        string
 	ScheduledInvestigations []ScheduledInvestigation
@@ -169,7 +170,7 @@ func (s *Service) failScheduledIntake(
 	ctx context.Context, event Event, investigation ScheduledInvestigation, reason string,
 ) {
 	_ = s.slack.Reply(ctx, event.Channel, event.TS, truncateSlack(
-		ScheduledFailureReplyPrefix+" "+reason, s.config.SlackOutputMaxChars))
+		ScheduledFailureReplyPrefix+" "+reason))
 	s.transition(ctx, event, "", "x")
 	s.metrics.ScheduledInvestigation("failed")
 	slog.Error("scheduled investigation failed", "name", investigation.Name, "schedule", investigation.Schedule)
@@ -241,7 +242,7 @@ func (s *Service) failScheduledShutdown(ctx context.Context, item work) {
 		return
 	}
 	_ = s.slack.Reply(ctx, item.event.Channel, item.event.TS,
-		truncateSlack(ShutdownReply, s.config.SlackOutputMaxChars))
+		truncateSlack(ShutdownReply))
 	s.transition(ctx, item.event, "", "x")
 	s.metrics.ScheduledInvestigation("failed")
 	slog.Error("scheduled investigation failed",
@@ -315,7 +316,7 @@ func (s *Service) handleScheduled(ctx context.Context, event Event, investigatio
 
 func (s *Service) failVerification(ctx context.Context, event Event, reason string) {
 	_ = s.slack.Reply(ctx, event.Channel, event.TS, truncateSlack(
-		AlertmanagerFailureReplyPrefix+" "+reason, s.config.SlackOutputMaxChars))
+		AlertmanagerFailureReplyPrefix+" "+reason))
 	s.metrics.Event("failed")
 	s.transition(ctx, event, "eyes", "x")
 }
@@ -381,20 +382,36 @@ func (s *Service) runHolmesFrom(
 			message = ShutdownReply
 		}
 		_ = s.slack.Reply(replyCtx, event.Channel, replyThreadTS,
-			truncateSlack(message, s.config.SlackOutputMaxChars))
+			truncateSlack(message))
 		s.transition(replyCtx, event, "hourglass_flowing_sand", "x")
 		cancelReply()
 		return false
 	}
 	s.metrics.Holmes("success", time.Since(started))
-	answer = truncateSlack(sanitize(answer), s.config.SlackOutputMaxChars)
-	if err := s.slack.Reply(ctx, event.Channel, replyThreadTS, answer); err != nil {
-		s.metrics.Event("failed")
-		s.transition(ctx, event, "hourglass_flowing_sand", "x")
-		return false
+	parts := splitSlack(sanitize(answer))
+	for index, part := range parts[:min(len(parts), slackAnswerMaxParts)] {
+		if err := s.slack.Reply(ctx, event.Channel, replyThreadTS, part); err != nil {
+			return s.failHolmesAnswerDelivery(ctx, event, replyThreadTS,
+				fmt.Sprintf("part %d of %d: %s", index+1, len(parts), sanitize(err.Error())))
+		}
+	}
+	if len(parts) > slackAnswerMaxParts {
+		return s.failHolmesAnswerDelivery(ctx, event, replyThreadTS,
+			fmt.Sprintf("answer has %d parts; only the first %d were delivered", len(parts), slackAnswerMaxParts))
 	}
 	s.transition(ctx, event, "hourglass_flowing_sand", "white_check_mark")
 	return true
+}
+
+func (s *Service) failHolmesAnswerDelivery(
+	ctx context.Context, event Event, replyThreadTS, reason string,
+) bool {
+	s.metrics.Event("failed")
+	_ = s.slack.Reply(ctx, event.Channel, replyThreadTS,
+		truncateSlack(HolmesAnswerDeliveryFailureReplyPrefix+
+			" The answer is incomplete; ask AlertLens again to retry. "+reason))
+	s.transition(ctx, event, "hourglass_flowing_sand", "x")
+	return false
 }
 
 func (s *Service) lockThread(channel, parentTS string) func() {

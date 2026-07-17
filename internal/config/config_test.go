@@ -134,7 +134,6 @@ func TestLoadDefaults(t *testing.T) {
 		cfg.AlertPayloadMaxBytes != 32768 ||
 		cfg.RunbookMaxBytes != 8192 ||
 		cfg.ConversationMaxBytes != 256<<10 ||
-		cfg.SlackOutputMaxChars != 2500 ||
 		cfg.MetricsAddr != ":9090" ||
 		cfg.HolmesResponseLanguage != "auto" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
@@ -156,7 +155,6 @@ func TestLoadOverrides(t *testing.T) {
 	env["ALERT_PAYLOAD_MAX_BYTES"] = "1000"
 	env["RUNBOOK_MAX_BYTES"] = "2000"
 	env["CONVERSATION_MAX_BYTES"] = "4000"
-	env["SLACK_OUTPUT_MAX_CHARS"] = "500"
 	env["METRICS_ADDR"] = "127.0.0.1:0"
 	env["HOLMES_RESPONSE_LANGUAGE"] = " zh-CN "
 
@@ -168,7 +166,7 @@ func TestLoadOverrides(t *testing.T) {
 		cfg.HolmesMaxConcurrency != 2 || cfg.EventQueueSize != 10 ||
 		cfg.AlertPayloadMaxBytes != 1000 || cfg.RunbookMaxBytes != 2000 ||
 		cfg.ConversationMaxBytes != 4000 ||
-		cfg.SlackOutputMaxChars != 500 || cfg.MetricsAddr != "127.0.0.1:0" ||
+		cfg.MetricsAddr != "127.0.0.1:0" ||
 		cfg.HolmesResponseLanguage != "zh-CN" {
 		t.Fatalf("unexpected overrides: %+v", cfg)
 	}
@@ -200,7 +198,6 @@ func TestLoadRejectsInvalidValuesWithoutLeakingSecrets(t *testing.T) {
 		{name: "alert payload minimum", key: "ALERT_PAYLOAD_MAX_BYTES", value: "127"},
 		{name: "runbook limit", key: "RUNBOOK_MAX_BYTES", value: "0"},
 		{name: "conversation bytes", key: "CONVERSATION_MAX_BYTES", value: "0"},
-		{name: "Slack output limit", key: "SLACK_OUTPUT_MAX_CHARS", value: "0"},
 	}
 
 	for _, tt := range tests {

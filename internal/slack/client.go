@@ -151,6 +151,7 @@ func failureReply(text string) bool {
 	return strings.HasPrefix(text, service.AlertmanagerFailureReplyPrefix) ||
 		strings.HasPrefix(text, legacyAlertmanagerFailureReplyPrefix) ||
 		strings.HasPrefix(text, service.HolmesFailureReplyPrefix) ||
+		strings.HasPrefix(text, service.HolmesAnswerDeliveryFailureReplyPrefix) ||
 		strings.HasPrefix(text, service.ScheduledFailureReplyPrefix) ||
 		text == service.ShutdownReply
 }

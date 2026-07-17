@@ -35,7 +35,6 @@ type Config struct {
 	AlertPayloadMaxBytes    int
 	RunbookMaxBytes         int
 	ConversationMaxBytes    int
-	SlackOutputMaxChars     int
 	HolmesResponseLanguage  string
 	MetricsAddr             string
 	ScheduledInvestigations []ScheduledInvestigation
@@ -96,9 +95,6 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ConversationMaxBytes, err = positiveInt(getenv, "CONVERSATION_MAX_BYTES", 256<<10); err != nil {
-		return Config{}, err
-	}
-	if cfg.SlackOutputMaxChars, err = positiveInt(getenv, "SLACK_OUTPUT_MAX_CHARS", 2500); err != nil {
 		return Config{}, err
 	}
 	cfg.HolmesResponseLanguage = strings.TrimSpace(getenv("HOLMES_RESPONSE_LANGUAGE"))

@@ -381,6 +381,62 @@ func TestReplyFailureEndsWithFailureReaction(t *testing.T) {
 	waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
 }
 
+func TestHolmesAnswerDelivery(t *testing.T) {
+	t.Run("all parts", func(t *testing.T) {
+		slack := &fakeSlack{}
+		service := startService(t, activeAlertmanager("A", "ns"),
+			holmesFunc(func(context.Context, holmes.Request) (string, error) {
+				return strings.Repeat("x", slackMessageMaxChars+1), nil
+			}), slack, Config{})
+		service.Submit(context.Background(), firingEvent("1", "A", "ns"))
+		waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:1") })
+		replies := slack.replyLog()
+		if len(replies) != 2 || !strings.Contains(replies[0], "(1/2) ") ||
+			!strings.Contains(replies[1], "(2/2) ") || slack.hasReaction("add:x:C1:1") {
+			t.Fatalf("replies = %#v, reactions = %#v", replies, slack.reactionLog())
+		}
+	})
+
+	t.Run("second part", func(t *testing.T) {
+		var calls atomic.Int32
+		slack := &fakeSlack{replyFunc: func(context.Context, string, string, string) error {
+			if calls.Add(1) == 2 {
+				return errors.New("Slack unavailable")
+			}
+			return nil
+		}}
+		service := startService(t, activeAlertmanager("A", "ns"),
+			holmesFunc(func(context.Context, holmes.Request) (string, error) {
+				return strings.Repeat("x", slackMessageMaxChars+1), nil
+			}), slack, Config{})
+		service.Submit(context.Background(), firingEvent("1", "A", "ns"))
+		waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
+		replies := slack.replyLog()
+		if len(replies) != 3 || !strings.Contains(replies[0], "(1/2) ") ||
+			!strings.Contains(replies[2], HolmesAnswerDeliveryFailureReplyPrefix) ||
+			!strings.Contains(replies[2], "answer is incomplete") ||
+			!strings.Contains(replies[2], "part 2 of 2") {
+			t.Fatalf("replies = %#v", replies)
+		}
+	})
+
+	t.Run("part limit", func(t *testing.T) {
+		slack := &fakeSlack{}
+		service := startService(t, activeAlertmanager("A", "ns"),
+			holmesFunc(func(context.Context, holmes.Request) (string, error) {
+				return strings.Repeat("x", slackMessageMaxChars*11), nil
+			}), slack, Config{})
+		service.Submit(context.Background(), firingEvent("1", "A", "ns"))
+		waitFor(t, func() bool { return slack.hasReaction("add:x:C1:1") })
+		replies := slack.replyLog()
+		if len(replies) != slackAnswerMaxParts+1 || !strings.Contains(replies[0], "(1/12) ") ||
+			!strings.Contains(replies[len(replies)-1], HolmesAnswerDeliveryFailureReplyPrefix) ||
+			!strings.Contains(replies[len(replies)-1], "only the first 10 were delivered") {
+			t.Fatalf("replies = %#v", replies)
+		}
+	})
+}
+
 func TestReactionFailureDoesNotFailRCA(t *testing.T) {
 	slack := &fakeSlack{reactionErr: errors.New("reaction denied")}
 	service := startService(t, activeAlertmanager("A", "ns"),
@@ -679,9 +735,6 @@ func newService(am Alertmanager, h Holmes, slack Slack, cfg Config) *Service {
 	}
 	if cfg.ConversationMaxBytes == 0 {
 		cfg.ConversationMaxBytes = 256 << 10
-	}
-	if cfg.SlackOutputMaxChars == 0 {
-		cfg.SlackOutputMaxChars = 2500
 	}
 	return New(am, h, slack, cfg, nil)
 }
