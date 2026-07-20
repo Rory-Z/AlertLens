@@ -60,6 +60,8 @@ spec:
               value: {{ required "holmesURL is required" .Values.holmesURL | quote }}
             - name: HOLMES_RESPONSE_LANGUAGE
               value: {{ .Values.holmesResponseLanguage | quote }}
+            - name: HOLMESGPT_MAX_CONCURRENCY
+              value: {{ .Values.holmesMaxConcurrency | quote }}
             - name: METRICS_ADDR
               value: :9090
             {{- if .Values.scheduledInvestigations }}
