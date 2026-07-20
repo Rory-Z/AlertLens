@@ -73,8 +73,8 @@ A thread reply containing a sanitized and length-bounded failure reason. Active 
 _Avoid_: Generic failure message, fixed timeout reason, reaction-only failure
 
 **Holmes Answer**:
-A successful investigation result returned by Holmes and delivered to an Investigation Workspace. It may span consecutive Slack replies but is complete only when every part is delivered.
-_Avoid_: Slack message, truncated answer, Failure Reply
+A complete, non-empty user-visible analysis field parsed from Holmes API output and delivered to an Investigation Workspace. Holmes API metadata, conversation history, and tool-call traces are not part of the Answer. Every Answer receives best-effort delivery across consecutive Slack replies: if the surrounding response is invalid or delivery cannot complete, delivered parts remain and a separate Failure Reply states that the operation failed or the Answer is incomplete.
+_Avoid_: Slack message, silently truncated answer, Failure Reply
 
 **Holmes Response Language**:
 The language policy for successful Holmes answers, expressed as `auto` or any non-empty language tag. `auto` is the default and leaves the language to Holmes. It does not govern AlertLens warnings, failure replies, or truncation notices.

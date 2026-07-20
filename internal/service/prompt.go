@@ -185,35 +185,58 @@ func splitSlack(text string) []string {
 	return parts
 }
 
+func splitSlackOverflow(text string) []string {
+	prefixChars := utf8.RuneCountInString("(10/10+) ")
+	maxChars := slackMessageMaxChars - prefixChars
+	runes := []rune(firstRunes(text, slackAnswerMaxParts*maxChars))
+	parts := splitSlackContent(runes, maxChars)
+	parts = parts[:min(len(parts), slackAnswerMaxParts)]
+	for index := range parts {
+		parts[index] = fmt.Sprintf("(%d/10+) %s", index+1, parts[index])
+	}
+	return parts
+}
+
+func firstRunes(text string, max int) string {
+	count := 0
+	for index := range text {
+		if count == max {
+			return text[:index]
+		}
+		count++
+	}
+	return text
+}
+
 func splitSlackContent(runes []rune, maxChars int) []string {
 	var parts []string
 	for len(runes) > maxChars {
-		cut := maxChars
-		for index := maxChars; index > 1; index-- {
-			if runes[index-1] != '\n' {
-				continue
-			}
-			previous := index - 2
-			if runes[previous] == '\r' {
-				previous--
-			}
-			if previous >= 0 && runes[previous] == '\n' {
-				cut = index
-				break
-			}
-		}
-		if cut == maxChars {
-			for index := maxChars; index > 0; index-- {
-				if runes[index-1] == '\n' {
-					cut = index
-					break
-				}
-			}
-		}
+		cut := slackSplitPoint(runes, maxChars)
 		parts = append(parts, string(runes[:cut]))
 		runes = runes[cut:]
 	}
 	return append(parts, string(runes))
+}
+
+func slackSplitPoint(runes []rune, maxChars int) int {
+	for index := maxChars; index > 1; index-- {
+		if runes[index-1] != '\n' {
+			continue
+		}
+		previous := index - 2
+		if runes[previous] == '\r' {
+			previous--
+		}
+		if previous >= 0 && runes[previous] == '\n' {
+			return index
+		}
+	}
+	for index := maxChars; index > 0; index-- {
+		if runes[index-1] == '\n' {
+			return index
+		}
+	}
+	return maxChars
 }
 
 func truncateBytes(text string, maxBytes int) string {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"log/slog"
@@ -371,45 +372,72 @@ func (s *Service) runHolmesFrom(
 	started := time.Now()
 	answer, err := s.holmes.Chat(ctx, request)
 	s.metrics.HolmesActive(-1)
-	if err != nil {
+	analysisTooLarge := errors.Is(err, holmes.ErrAnalysisTooLarge)
+	requestFailed := err != nil && (errors.Is(err, holmes.ErrInvalidResponse) || !analysisTooLarge)
+	if requestFailed {
 		s.metrics.Holmes("error", time.Since(started))
-		s.metrics.Event("failed")
-		replyCtx := ctx
-		message := HolmesFailureReplyPrefix + " " + sanitize(err.Error())
-		cancelReply := func() {}
-		if ctx.Err() != nil {
-			replyCtx, cancelReply = context.WithTimeout(context.Background(), defaultShutdownReplyTimeout)
-			message = ShutdownReply
-		}
-		_ = s.slack.Reply(replyCtx, event.Channel, replyThreadTS,
-			truncateSlack(message))
-		s.transition(replyCtx, event, "hourglass_flowing_sand", "x")
-		cancelReply()
-		return false
+	} else {
+		s.metrics.Holmes("success", time.Since(started))
 	}
-	s.metrics.Holmes("success", time.Since(started))
-	parts := splitSlack(sanitize(answer))
+	if requestFailed && answer == "" {
+		return s.failHolmesRequest(ctx, event, replyThreadTS, err)
+	}
+	answer = sanitize(answer)
+	var parts []string
+	if analysisTooLarge {
+		parts = splitSlackOverflow(answer)
+	} else {
+		parts = splitSlack(answer)
+	}
 	for index, part := range parts[:min(len(parts), slackAnswerMaxParts)] {
 		if err := s.slack.Reply(ctx, event.Channel, replyThreadTS, part); err != nil {
 			return s.failHolmesAnswerDelivery(ctx, event, replyThreadTS,
-				fmt.Sprintf("part %d of %d: %s", index+1, len(parts), sanitize(err.Error())))
+				fmt.Sprintf("The answer is incomplete; ask AlertLens again to retry. part %d of %d: %s",
+					index+1, len(parts), sanitize(err.Error())))
 		}
+	}
+	if requestFailed {
+		return s.failHolmesRequest(ctx, event, replyThreadTS, err)
+	}
+	if analysisTooLarge {
+		return s.failHolmesAnswerDelivery(ctx, event, replyThreadTS,
+			fmt.Sprintf("The answer is incomplete; %s; only the first %d parts were delivered. "+
+				"Ask AlertLens a narrower follow-up question.", err, slackAnswerMaxParts))
 	}
 	if len(parts) > slackAnswerMaxParts {
 		return s.failHolmesAnswerDelivery(ctx, event, replyThreadTS,
-			fmt.Sprintf("answer has %d parts; only the first %d were delivered", len(parts), slackAnswerMaxParts))
+			fmt.Sprintf("The answer is incomplete; answer has %d parts; only the first %d were delivered. "+
+				"Ask AlertLens a narrower follow-up question.", len(parts), slackAnswerMaxParts))
 	}
 	s.transition(ctx, event, "hourglass_flowing_sand", "white_check_mark")
 	return true
+}
+
+func (s *Service) failHolmesRequest(
+	ctx context.Context, event Event, replyThreadTS string, err error,
+) bool {
+	s.metrics.Event("failed")
+	slog.Error("Holmes request failed", "reason", sanitize(err.Error()))
+	replyCtx := ctx
+	message := HolmesFailureReplyPrefix + " " + sanitize(err.Error())
+	cancelReply := func() {}
+	if ctx.Err() != nil {
+		replyCtx, cancelReply = context.WithTimeout(context.Background(), defaultShutdownReplyTimeout)
+		message = ShutdownReply
+	}
+	_ = s.slack.Reply(replyCtx, event.Channel, replyThreadTS, truncateSlack(message))
+	s.transition(replyCtx, event, "hourglass_flowing_sand", "x")
+	cancelReply()
+	return false
 }
 
 func (s *Service) failHolmesAnswerDelivery(
 	ctx context.Context, event Event, replyThreadTS, reason string,
 ) bool {
 	s.metrics.Event("failed")
+	slog.Error("Holmes answer delivery failed", "reason", sanitize(reason))
 	_ = s.slack.Reply(ctx, event.Channel, replyThreadTS,
-		truncateSlack(HolmesAnswerDeliveryFailureReplyPrefix+
-			" The answer is incomplete; ask AlertLens again to retry. "+reason))
+		truncateSlack(HolmesAnswerDeliveryFailureReplyPrefix+" "+reason))
 	s.transition(ctx, event, "hourglass_flowing_sand", "x")
 	return false
 }

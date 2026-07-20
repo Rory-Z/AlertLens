@@ -528,6 +528,94 @@ func TestScheduledInvestigationCreatesRootAndRepliesInThread(t *testing.T) {
 	}
 }
 
+func TestScheduledInvestigationBestEffortDeliveryForOversizedAnalysis(t *testing.T) {
+	holmesServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"analysis":"`+strings.Repeat("x", 4<<20+1)+`"}`)
+	}))
+	defer holmesServer.Close()
+
+	slack := &fakeSlack{rootTS: "100.1"}
+	service := startService(t, nil, holmes.New(testURL(t, holmesServer.URL), 15*time.Second), slack,
+		Config{MonitoredChannel: "C1"})
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "weekly", Prompt: "investigate"}) {
+		t.Fatal("Scheduled Investigation was not accepted")
+	}
+	waitForWithin(t, 15*time.Second, func() bool { return slack.hasReaction("add:x:C1:100.1") })
+
+	replies := slack.replyLog()
+	if len(replies) != slackAnswerMaxParts+1 || !strings.Contains(replies[0], "(1/10+) ") ||
+		!strings.Contains(replies[slackAnswerMaxParts-1], "(10/10+) ") ||
+		!strings.Contains(replies[len(replies)-1], HolmesAnswerDeliveryFailureReplyPrefix) ||
+		!strings.Contains(replies[len(replies)-1], "analysis exceeds 4194304 bytes") ||
+		!strings.Contains(replies[len(replies)-1], "narrower follow-up question") {
+		t.Fatalf("replies = %#v", replies)
+	}
+	w := httptest.NewRecorder()
+	service.metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(w.Body.String(), `alertlens_holmes_requests_total{outcome="success"} 1`) ||
+		!strings.Contains(w.Body.String(), `alertlens_scheduled_investigations_total{outcome="failed"} 1`) {
+		t.Fatalf("metrics = %q", w.Body.String())
+	}
+}
+
+func TestScheduledInvestigationBestEffortDeliveryBeforeMalformedEnvelopeFailure(t *testing.T) {
+	holmesServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"analysis":"root cause","conversation_history":[`)
+	}))
+	defer holmesServer.Close()
+
+	slack := &fakeSlack{rootTS: "100.1"}
+	service := startService(t, nil, holmes.New(testURL(t, holmesServer.URL), 15*time.Second), slack,
+		Config{MonitoredChannel: "C1"})
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "weekly", Prompt: "investigate"}) {
+		t.Fatal("Scheduled Investigation was not accepted")
+	}
+	waitFor(t, func() bool { return slack.hasReaction("add:x:C1:100.1") })
+
+	replies := slack.replyLog()
+	if len(replies) != 2 || replies[0] != "C1:100.1:root cause" ||
+		!strings.Contains(replies[1], HolmesFailureReplyPrefix) ||
+		!strings.Contains(replies[1], "decode Holmes response") ||
+		strings.Contains(replies[1], HolmesAnswerDeliveryFailureReplyPrefix) {
+		t.Fatalf("replies = %#v", replies)
+	}
+	w := httptest.NewRecorder()
+	service.metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(w.Body.String(), `alertlens_holmes_requests_total{outcome="error"} 1`) ||
+		!strings.Contains(w.Body.String(), `alertlens_scheduled_investigations_total{outcome="failed"} 1`) {
+		t.Fatalf("metrics = %q", w.Body.String())
+	}
+}
+
+func TestMalformedEnvelopeTakesPrecedenceAfterOversizedAnalysis(t *testing.T) {
+	holmesServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"analysis":"`+strings.Repeat("x", 4<<20+1)+`","conversation_history":[`)
+	}))
+	defer holmesServer.Close()
+
+	slack := &fakeSlack{rootTS: "100.1"}
+	service := startService(t, nil, holmes.New(testURL(t, holmesServer.URL), 15*time.Second), slack,
+		Config{MonitoredChannel: "C1"})
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "weekly", Prompt: "investigate"}) {
+		t.Fatal("Scheduled Investigation was not accepted")
+	}
+	waitForWithin(t, 15*time.Second, func() bool { return slack.hasReaction("add:x:C1:100.1") })
+
+	replies := slack.replyLog()
+	if len(replies) != slackAnswerMaxParts+1 || !strings.Contains(replies[0], "(1/10+) ") ||
+		!strings.Contains(replies[slackAnswerMaxParts-1], "(10/10+) ") ||
+		!strings.Contains(replies[len(replies)-1], HolmesFailureReplyPrefix) ||
+		!strings.Contains(replies[len(replies)-1], "decode Holmes response") ||
+		strings.Contains(replies[len(replies)-1], HolmesAnswerDeliveryFailureReplyPrefix) {
+		t.Fatalf("replies = %#v", replies)
+	}
+	w := httptest.NewRecorder()
+	service.metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(w.Body.String(), `alertlens_holmes_requests_total{outcome="error"} 1`) {
+		t.Fatalf("metrics = %q", w.Body.String())
+	}
+}
+
 func TestScheduledInvestigationStopsWhenRootCannotBeCreated(t *testing.T) {
 	var holmesCalls atomic.Int32
 	slack := &fakeSlack{postErr: errors.New("Slack unavailable")}
@@ -874,8 +962,12 @@ func (f *fakeSlack) conversationLog() []string {
 }
 
 func waitFor(t *testing.T, condition func() bool) {
+	waitForWithin(t, 2*time.Second, condition)
+}
+
+func waitForWithin(t *testing.T, timeout time.Duration, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if condition() {
 			return

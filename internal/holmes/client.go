@@ -6,14 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
 
-const maxResponseBytes = 4 << 20
+const maxAnalysisBytes = 4 << 20
+
+var ErrAnalysisTooLarge = fmt.Errorf("holmes analysis exceeds %d bytes", maxAnalysisBytes)
+var ErrInvalidResponse = errors.New("invalid Holmes response")
+
+type responseError struct {
+	cause            error
+	analysisTooLarge bool
+}
+
+func (e *responseError) Error() string { return "decode Holmes response: " + e.cause.Error() }
+
+func (e *responseError) Is(target error) bool {
+	return target == ErrInvalidResponse || e.analysisTooLarge && target == ErrAnalysisTooLarge
+}
 
 type Message struct {
 	Role    string `json:"role"`
@@ -58,21 +71,18 @@ func (c *Client) Chat(ctx context.Context, request Request) (string, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("Holmes returned HTTP %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	analysis, analysisTooLarge, err := decodeResponse(resp.Body)
+	if strings.TrimSpace(analysis) == "" {
+		analysis = ""
+	}
 	if err != nil {
-		return "", fmt.Errorf("read Holmes response: %w", err)
+		return analysis, &responseError{cause: err, analysisTooLarge: analysisTooLarge}
 	}
-	if len(data) > maxResponseBytes {
-		return "", fmt.Errorf("Holmes response exceeds %d bytes", maxResponseBytes)
+	if analysisTooLarge {
+		return analysis, ErrAnalysisTooLarge
 	}
-	var response struct {
-		Analysis string `json:"analysis"`
-	}
-	if err := json.Unmarshal(data, &response); err != nil {
-		return "", fmt.Errorf("decode Holmes response: %w", err)
-	}
-	if strings.TrimSpace(response.Analysis) == "" {
+	if analysis == "" {
 		return "", errors.New("Holmes response has empty analysis")
 	}
-	return response.Analysis, nil
+	return analysis, nil
 }
