@@ -183,7 +183,7 @@ func TestChatRejectsBadResponses(t *testing.T) {
 		{name: "malformed", body: "{", want: "decode Holmes response"},
 		{name: "empty analysis", body: `{"analysis":""}`, want: "empty analysis"},
 		{name: "oversized", body: `{"analysis":"` + strings.Repeat("x", 4<<20+1) + `"}`,
-			want: "Holmes analysis exceeds 4194304 bytes"},
+			want: "holmes analysis exceeds 4194304 bytes"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

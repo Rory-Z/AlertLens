@@ -189,15 +189,8 @@ func splitSlackOverflow(text string) []string {
 	prefixChars := utf8.RuneCountInString("(10/10+) ")
 	maxChars := slackMessageMaxChars - prefixChars
 	runes := []rune(firstRunes(text, slackAnswerMaxParts*maxChars))
-	parts := make([]string, 0, slackAnswerMaxParts)
-	for len(runes) > 0 && len(parts) < slackAnswerMaxParts {
-		cut := len(runes)
-		if cut > maxChars {
-			cut = slackSplitPoint(runes, maxChars)
-		}
-		parts = append(parts, string(runes[:cut]))
-		runes = runes[cut:]
-	}
+	parts := splitSlackContent(runes, maxChars)
+	parts = parts[:min(len(parts), slackAnswerMaxParts)]
 	for index := range parts {
 		parts[index] = fmt.Sprintf("(%d/10+) %s", index+1, parts[index])
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -246,21 +247,8 @@ func (d *responseDecoder) readHexRune() (rune, error) {
 }
 
 func parseHexRune(encoded []byte) (rune, bool) {
-	var value rune
-	for _, b := range encoded[:4] {
-		value <<= 4
-		switch {
-		case b >= '0' && b <= '9':
-			value += rune(b - '0')
-		case b >= 'a' && b <= 'f':
-			value += rune(b-'a') + 10
-		case b >= 'A' && b <= 'F':
-			value += rune(b-'A') + 10
-		default:
-			return 0, false
-		}
-	}
-	return value, true
+	value, err := strconv.ParseUint(string(encoded[:4]), 16, 16)
+	return rune(value), err == nil
 }
 
 func (d *responseDecoder) skipNumber(first byte) error {

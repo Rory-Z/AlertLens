@@ -14,7 +14,7 @@ import (
 
 const maxAnalysisBytes = 4 << 20
 
-var ErrAnalysisTooLarge = fmt.Errorf("Holmes analysis exceeds %d bytes", maxAnalysisBytes)
+var ErrAnalysisTooLarge = fmt.Errorf("holmes analysis exceeds %d bytes", maxAnalysisBytes)
 var ErrInvalidResponse = errors.New("invalid Holmes response")
 
 type responseError struct {
