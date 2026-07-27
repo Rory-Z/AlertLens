@@ -57,7 +57,7 @@ An RCA started for each notification whose marker has `status=firing` after Acti
 _Avoid_: Cooldown, lifecycle suppression, stored alert episode
 
 **Scheduled Investigation**:
-A recurring investigation identified by an installation-unique name and defined by its own schedule and prompt; it has no Alert Identity and does not perform Active Alert Verification. Each trigger starts a run by creating an Investigation Workspace in the Monitored Channel; every subsequent result or reportable failure is delivered there, where users may continue with ordinary Asks and Slack-derived Conversation Context.
+A recurring investigation identified by an installation-unique name and defined by its own schedule, prompt, and optional Holmes model selection; it has no Alert Identity and does not perform Active Alert Verification. Omitting the selection uses the Holmes default model; a supplied selection names a Holmes-configured model and Holmes owns its validation. Each trigger starts a run by creating an Investigation Workspace in the Monitored Channel; every subsequent result or reportable failure is delivered there, where users may continue with ordinary Asks and Slack-derived Conversation Context.
 _Avoid_: CronJob, Scheduled Investigation ID, scheduled Ask, scheduled job
 
 **Watchdog**:
@@ -65,7 +65,7 @@ An ordinary firing alert if it reaches a Monitored Channel. AlertLens has no Wat
 _Avoid_: AlertLens heartbeat, self-monitored dead man's switch
 
 **Ask**:
-An explicit `@AlertLens` question in a Monitored Channel. Every Ask follows the same path—even in an alert thread: AlertLens reconstructs Conversation Context from Slack and calls Holmes without Active Alert Verification or branching on an AlertLens marker. Holmes may use its configured tools to inspect current system state.
+An explicit `@AlertLens` question in a Monitored Channel. Every Ask uses the Holmes default model and follows the same path—even in an alert or Scheduled Investigation thread: AlertLens reconstructs Conversation Context from Slack and calls Holmes without Active Alert Verification or branching on an AlertLens marker. Holmes may use its configured tools to inspect current system state.
 _Avoid_: Alert follow-up session, marker-specific Ask, Alertmanager-enriched Ask
 
 **Failure Reply**:

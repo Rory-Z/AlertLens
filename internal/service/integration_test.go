@@ -60,7 +60,7 @@ func TestFiringAlert(t *testing.T) {
 	}
 	request := <-requestCh
 	if request.RequestSource != "alert_investigation" || request.SourceRef != "am:HighCPU:prod" ||
-		request.ConversationID != "slack:C1:100.1" ||
+		request.ConversationID != "slack:C1:100.1" || request.Model != "" ||
 		!strings.Contains(request.AdditionalSystemPrompt, "Respond in zh-CN.") ||
 		!strings.Contains(request.AdditionalSystemPrompt, "AlertLens verified") ||
 		!strings.Contains(request.Ask, `"verified":true`) ||
@@ -251,6 +251,7 @@ func TestAskReconstructsAndBoundsSlackConversationWithoutAlertmanager(t *testing
 	}
 	if !slices.Equal(request.ConversationHistory, wantHistory) || request.RequestSource != "freeform" ||
 		request.SourceRef != "slack:C1:1" || request.ConversationID != "slack:C1:1" ||
+		request.Model != "" ||
 		request.AdditionalSystemPrompt != wantPrompt || !strings.Contains(request.Ask, "reply in E") ||
 		len(slack.conversationLog()) != 1 {
 		t.Fatalf("request = %#v, conversation calls = %#v", request, slack.conversationLog())
@@ -494,6 +495,7 @@ func TestScheduledInvestigationCreatesRootAndRepliesInThread(t *testing.T) {
 		}), slack, Config{MonitoredChannel: "C1", HolmesResponseLanguage: "zh-CN"})
 	investigation := ScheduledInvestigation{
 		Name: "daily health", Schedule: "0 1 * * *", Prompt: "Investigate the platform health exactly as configured.\n",
+		Model: "scheduled",
 	}
 
 	if !service.SubmitScheduled(context.Background(), investigation) {
@@ -503,6 +505,7 @@ func TestScheduledInvestigationCreatesRootAndRepliesInThread(t *testing.T) {
 	request := <-requestCh
 	if request.Ask != investigation.Prompt || request.RequestSource != "scheduled_investigation" ||
 		request.SourceRef != "schedule:daily health" || request.ConversationID != "slack:C1:100.1" ||
+		request.Model != "scheduled" ||
 		request.AdditionalSystemPrompt != "Investigate using read-only tools. Do not mutate infrastructure. Respond in zh-CN." ||
 		len(request.ConversationHistory) != 0 {
 		t.Fatalf("Holmes request = %#v", request)
@@ -673,7 +676,9 @@ func TestAskWaitsForScheduledInvestigationAndUsesSlackHistory(t *testing.T) {
 		return "answer", nil
 	}), slack, Config{MonitoredChannel: "C1", Workers: 2})
 	prompt := "configured prompt that must not be injected into follow-up history"
-	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{Name: "daily health", Prompt: prompt}) {
+	if !service.SubmitScheduled(context.Background(), ScheduledInvestigation{
+		Name: "daily health", Prompt: prompt, Model: "scheduled",
+	}) {
 		t.Fatal("Scheduled Investigation was rejected")
 	}
 	<-firstStarted
@@ -688,14 +693,15 @@ func TestAskWaitsForScheduledInvestigationAndUsesSlackHistory(t *testing.T) {
 	}
 	close(releaseFirst)
 	waitFor(t, func() bool { return calls.Load() == 2 })
-	<-requests
+	initial := <-requests
 	followUp := <-requests
 	wantHistory := []holmes.Message{
 		{Role: "system", Content: investigationSystemPrompt},
 		{Role: "user", Content: "Scheduled investigation started: daily health"},
 		{Role: "assistant", Content: "initial answer"},
 	}
-	if !slices.Equal(followUp.ConversationHistory, wantHistory) || followUp.RequestSource != "freeform" ||
+	if initial.Model != "scheduled" || followUp.Model != "" ||
+		!slices.Equal(followUp.ConversationHistory, wantHistory) || followUp.RequestSource != "freeform" ||
 		followUp.ConversationID != "slack:C1:100.1" || strings.Contains(
 		strings.Join(messageContents(followUp.ConversationHistory), "\n"), prompt) {
 		t.Fatalf("follow-up request = %#v", followUp)

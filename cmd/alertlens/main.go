@@ -37,12 +37,6 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	metrics := observability.New()
 	slackClient := slackadapter.New(cfg.SlackBotToken, cfg.SlackAppToken, cfg.MonitoredChannel)
-	scheduledInvestigations := make([]service.ScheduledInvestigation, len(cfg.ScheduledInvestigations))
-	for i, investigation := range cfg.ScheduledInvestigations {
-		scheduledInvestigations[i] = service.ScheduledInvestigation{
-			Name: investigation.Name, Schedule: investigation.Schedule, Prompt: investigation.Prompt,
-		}
-	}
 	worker := service.New(
 		alertmanager.New(cfg.AlertmanagerURL, cfg.AlertmanagerTimeout),
 		holmes.New(cfg.HolmesURL, cfg.HolmesTimeout),
@@ -51,8 +45,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 			QueueSize: cfg.EventQueueSize, Workers: cfg.HolmesMaxConcurrency,
 			AlertPayloadMaxBytes: cfg.AlertPayloadMaxBytes,
 			RunbookMaxBytes:      cfg.RunbookMaxBytes, ConversationMaxBytes: cfg.ConversationMaxBytes,
-			HolmesResponseLanguage: cfg.HolmesResponseLanguage,
-			MonitoredChannel:       cfg.MonitoredChannel, ScheduledInvestigations: scheduledInvestigations,
+			HolmesResponseLanguage:  cfg.HolmesResponseLanguage,
+			MonitoredChannel:        cfg.MonitoredChannel,
+			ScheduledInvestigations: toServiceScheduledInvestigations(cfg.ScheduledInvestigations),
 		},
 		metrics,
 	)
@@ -65,6 +60,19 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return listener.Close()
 	}
 	return serve(ctx, listener, metrics.Handler(), slackClient, worker)
+}
+
+func toServiceScheduledInvestigations(in []config.ScheduledInvestigation) []service.ScheduledInvestigation {
+	out := make([]service.ScheduledInvestigation, len(in))
+	for i, investigation := range in {
+		out[i] = service.ScheduledInvestigation{
+			Name: investigation.Name, Schedule: investigation.Schedule, Prompt: investigation.Prompt,
+		}
+		if investigation.Model != nil {
+			out[i].Model = *investigation.Model
+		}
+	}
+	return out
 }
 
 type slackRunner interface {

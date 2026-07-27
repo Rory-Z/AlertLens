@@ -17,9 +17,10 @@ import (
 const scheduledInvestigationsMaxBytes = 1 << 20
 
 type ScheduledInvestigation struct {
-	Name     string `yaml:"name"`
-	Schedule string `yaml:"schedule"`
-	Prompt   string `yaml:"prompt"`
+	Name     string  `yaml:"name"`
+	Schedule string  `yaml:"schedule"`
+	Prompt   string  `yaml:"prompt"`
+	Model    *string `yaml:"model"`
 }
 
 type Config struct {
@@ -134,6 +135,12 @@ func scheduledInvestigations(path string) ([]ScheduledInvestigation, error) {
 	if err := yaml.UnmarshalStrict(contents, &document); err != nil {
 		return nil, fmt.Errorf("SCHEDULED_INVESTIGATIONS_FILE: %w", err)
 	}
+	var fields struct {
+		ScheduledInvestigations []yaml.MapSlice `yaml:"scheduledInvestigations"`
+	}
+	if err := yaml.Unmarshal(contents, &fields); err != nil {
+		return nil, fmt.Errorf("SCHEDULED_INVESTIGATIONS_FILE: %w", err)
+	}
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	names := make(map[string]struct{}, len(document.ScheduledInvestigations))
 	for i := range document.ScheduledInvestigations {
@@ -158,6 +165,13 @@ func scheduledInvestigations(path string) ([]ScheduledInvestigation, error) {
 		}
 		if strings.TrimSpace(investigation.Prompt) == "" {
 			return nil, fmt.Errorf("SCHEDULED_INVESTIGATIONS_FILE: entry %d prompt must not be empty", i+1)
+		}
+		for _, field := range fields.ScheduledInvestigations[i] {
+			if field.Key == "model" && (investigation.Model == nil || strings.TrimSpace(*investigation.Model) == "") {
+				return nil, fmt.Errorf(
+					"SCHEDULED_INVESTIGATIONS_FILE: entry %d model must not be empty", i+1,
+				)
+			}
 		}
 	}
 	return document.ScheduledInvestigations, nil

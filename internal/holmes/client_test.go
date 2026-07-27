@@ -53,6 +53,29 @@ func TestChatUsesHolmesAPIContractWithoutCredentials(t *testing.T) {
 	}
 }
 
+func TestChatSendsRequestedModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Model != "scheduled" {
+			t.Fatalf("model = %q", request.Model)
+		}
+		_, _ = io.WriteString(w, `{"analysis":"root cause"}`)
+	}))
+	defer server.Close()
+
+	_, err := New(holmesURL(t, server.URL), time.Second).Chat(
+		context.Background(), Request{Ask: "investigate", Model: "scheduled"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChatParsesHolmesResponseFieldsInAnyOrder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{

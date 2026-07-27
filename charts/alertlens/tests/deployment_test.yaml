@@ -53,6 +53,7 @@ tests:
       scheduledInvestigations:
         - name: daily health
           schedule: "0 1 * * *"
+          model: scheduled
           prompt: |
             Investigate the daily health of the platform.
     asserts:

@@ -56,6 +56,7 @@ type ScheduledInvestigation struct {
 	Name     string
 	Schedule string
 	Prompt   string
+	Model    string
 }
 
 type Config struct {
@@ -145,7 +146,8 @@ func (s *Service) SubmitScheduled(ctx context.Context, investigation ScheduledIn
 	rootTS, err := s.slack.Post(ctx, s.config.MonitoredChannel, "Scheduled investigation started: "+investigation.Name)
 	if err != nil || rootTS == "" {
 		s.metrics.ScheduledInvestigation("failed")
-		slog.Error("scheduled investigation failed", "name", investigation.Name, "schedule", investigation.Schedule)
+		slog.Error("scheduled investigation failed", "name", investigation.Name,
+			"schedule", investigation.Schedule, "model", investigation.Model)
 		return false
 	}
 	event := Event{Channel: s.config.MonitoredChannel, TS: rootTS}
@@ -174,7 +176,8 @@ func (s *Service) failScheduledIntake(
 		ScheduledFailureReplyPrefix+" "+reason))
 	s.transition(ctx, event, "", "x")
 	s.metrics.ScheduledInvestigation("failed")
-	slog.Error("scheduled investigation failed", "name", investigation.Name, "schedule", investigation.Schedule)
+	slog.Error("scheduled investigation failed", "name", investigation.Name,
+		"schedule", investigation.Schedule, "model", investigation.Model)
 }
 
 func (s *Service) Run(ctx context.Context) {
@@ -247,7 +250,8 @@ func (s *Service) failScheduledShutdown(ctx context.Context, item work) {
 	s.transition(ctx, item.event, "", "x")
 	s.metrics.ScheduledInvestigation("failed")
 	slog.Error("scheduled investigation failed",
-		"name", item.scheduledInvestigation.Name, "schedule", item.scheduledInvestigation.Schedule)
+		"name", item.scheduledInvestigation.Name, "schedule", item.scheduledInvestigation.Schedule,
+		"model", item.scheduledInvestigation.Model)
 }
 
 func (s *Service) handle(ctx context.Context, item work) {
@@ -298,6 +302,7 @@ func (s *Service) handleScheduled(ctx context.Context, event Event, investigatio
 	defer unlock()
 	request := holmes.Request{
 		Ask:                    investigation.Prompt,
+		Model:                  investigation.Model,
 		AdditionalSystemPrompt: scheduledHolmesSystemPrompt(s.config.HolmesResponseLanguage),
 		RequestSource:          "scheduled_investigation",
 		SourceRef:              "schedule:" + investigation.Name,
@@ -309,9 +314,11 @@ func (s *Service) handleScheduled(ctx context.Context, event Event, investigatio
 	}
 	s.metrics.ScheduledInvestigation(outcome)
 	if outcome == "success" {
-		slog.Info("scheduled investigation completed", "name", investigation.Name, "schedule", investigation.Schedule)
+		slog.Info("scheduled investigation completed", "name", investigation.Name,
+			"schedule", investigation.Schedule, "model", investigation.Model)
 	} else {
-		slog.Error("scheduled investigation failed", "name", investigation.Name, "schedule", investigation.Schedule)
+		slog.Error("scheduled investigation failed", "name", investigation.Name,
+			"schedule", investigation.Schedule, "model", investigation.Model)
 	}
 }
 
