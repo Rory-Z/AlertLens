@@ -103,8 +103,14 @@ networkPolicy:
       ports: [5050]
 ```
 
-For the FlowMQ dev cluster, use `~/.kube/flowmq-dev-tiger.yaml` as the
-kubeconfig. The service URLs are:
+For the FlowMQ dev cluster, authenticate and use the access kubeconfig:
+
+```bash
+aws login --remote --profile flowmq-dev-access --region us-east-1
+export KUBECONFIG=~/.kube/flowmq-dev-tiger-access.yaml
+```
+
+The service URLs are:
 
 ```text
 http://vmalertmanager-victoria-metrics-k8s-stack.victoria.svc:9093
@@ -129,7 +135,7 @@ The defaults are:
 
 | Variable | Default |
 | --- | --- |
-| `KUBECONFIG` | `~/.kube/flowmq-dev-tiger.yaml` |
+| `KUBECONFIG` | `~/.kube/flowmq-dev-tiger-access.yaml` |
 | `IMAGE` | `ghcr.io/rory-z/alertlens:latest` |
 | `E2E_NAMESPACE` | `alertlens-e2e` |
 | `E2E_RELEASE` | `alertlens-e2e` |
