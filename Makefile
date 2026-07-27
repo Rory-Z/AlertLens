@@ -1,7 +1,7 @@
 IMAGE ?= ghcr.io/rory-z/alertlens:latest
 IMAGE_PLATFORMS ?=
 
-KUBECONFIG ?= $(HOME)/.kube/flowmq-dev-tiger.yaml
+KUBECONFIG ?= $(HOME)/.kube/flowmq-dev-tiger-access.yaml
 
 E2E_NAMESPACE ?= alertlens-e2e
 E2E_RELEASE ?= alertlens-e2e
