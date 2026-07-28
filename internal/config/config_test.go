@@ -14,6 +14,7 @@ func TestLoadScheduledInvestigationsFromYAML(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`scheduledInvestigations:
   - name: daily health
     schedule: "0 1 * * *"
+    model: " scheduled "
     prompt: |
       Investigate the daily health of the platform.
   - name: weekly capacity
@@ -33,8 +34,12 @@ func TestLoadScheduledInvestigationsFromYAML(t *testing.T) {
 		t.Fatalf("scheduled investigations = %#v", cfg.ScheduledInvestigations)
 	}
 	if got := cfg.ScheduledInvestigations[0]; got.Name != "daily health" ||
-		got.Schedule != "0 1 * * *" || got.Prompt != "Investigate the daily health of the platform.\n" {
+		got.Schedule != "0 1 * * *" || got.Model == nil || *got.Model != " scheduled " ||
+		got.Prompt != "Investigate the daily health of the platform.\n" {
 		t.Fatalf("first scheduled investigation = %#v", got)
+	}
+	if cfg.ScheduledInvestigations[1].Model != nil {
+		t.Fatalf("second scheduled investigation = %#v", cfg.ScheduledInvestigations[1])
 	}
 }
 
@@ -55,6 +60,8 @@ func TestLoadRejectsInvalidScheduledInvestigations(t *testing.T) {
 		{name: "cron descriptor", contents: scheduledYAML("daily", "@daily", "super-secret", "")},
 		{name: "per-entry timezone", contents: scheduledYAML("daily", "CRON_TZ=America/New_York 0 1 * * *", "super-secret", "")},
 		{name: "empty prompt", contents: scheduledYAML("daily", "0 1 * * *", " ", "")},
+		{name: "empty model", contents: scheduledYAML("daily", "0 1 * * *", "super-secret", "    model: \"   \"\n")},
+		{name: "null model", contents: scheduledYAML("daily", "0 1 * * *", "super-secret", "    model: null\n")},
 		{name: "duplicate trimmed name", contents: `scheduledInvestigations:
   - name: daily
     schedule: "0 1 * * *"

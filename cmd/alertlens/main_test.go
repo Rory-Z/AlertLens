@@ -8,12 +8,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emqx/alertlens/internal/config"
 	"github.com/emqx/alertlens/internal/service"
 )
 
 func TestRunRejectsInvalidConfig(t *testing.T) {
 	if err := run(context.Background(), func(string) string { return "" }); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestServiceScheduledInvestigationsPreserveModel(t *testing.T) {
+	model := " scheduled "
+	got := toServiceScheduledInvestigations([]config.ScheduledInvestigation{{
+		Name: "daily", Schedule: "0 1 * * *", Prompt: "investigate", Model: &model,
+	}})
+	if len(got) != 1 || got[0].Name != "daily" || got[0].Schedule != "0 1 * * *" ||
+		got[0].Prompt != "investigate" || got[0].Model != model {
+		t.Fatalf("scheduled investigations = %#v", got)
 	}
 }
 

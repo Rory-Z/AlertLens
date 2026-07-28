@@ -11,6 +11,7 @@ tests:
       scheduledInvestigations:
         - name: daily health
           schedule: "0 1 * * *"
+          model: scheduled
           prompt: |
             Investigate line one.
             Investigate line two.
@@ -21,4 +22,4 @@ tests:
       - matchRegex:
           path: data["scheduled-investigations.yaml"]
           pattern: |-
-            (?s)^scheduledInvestigations:\n.*name: daily health.*prompt: \|.*Investigate line one\.\n.*Investigate line two\.\n.*schedule: 0 1 \* \* \*\n?$
+            (?s)^scheduledInvestigations:\n.*model: scheduled.*name: daily health.*prompt: \|.*Investigate line one\.\n.*Investigate line two\.\n.*schedule: 0 1 \* \* \*\n?$

@@ -64,17 +64,18 @@ go run ./cmd/alertlens
 
 The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default. Thread context is capped by `CONVERSATION_MAX_BYTES`, which defaults to 256 KiB; there is no turn-count limit. `HOLMES_RESPONSE_LANGUAGE` (Helm: `holmesResponseLanguage`) controls the language of successful Holmes answers; it defaults to `auto`, while values such as `zh-CN` add a system-level language directive.
 
-Scheduled Investigations are optional. Set `SCHEDULED_INVESTIGATIONS_FILE` to a YAML file no larger than 1 MiB; an unset variable disables them. The mapping-root file is decoded strictly at startup, names must be unique single-line values of at most 80 characters, schedules use five-field cron in UTC, and prompts are passed literally to Holmes:
+Scheduled Investigations are optional. Set `SCHEDULED_INVESTIGATIONS_FILE` to a YAML file no larger than 1 MiB; an unset variable disables them. The mapping-root file is decoded strictly at startup, names must be unique single-line values of at most 80 characters, schedules use five-field cron in UTC, and prompts are passed literally to Holmes. An optional `model` selects a Holmes `modelList` name for the initial scheduled run; omit it to use the Holmes default. Explicitly blank values are invalid, and Holmes owns model validation and routing:
 
 ```yaml
 scheduledInvestigations:
   - name: daily platform health
     schedule: "0 1 * * *"
+    model: scheduled
     prompt: |
       Investigate platform health and summarize anomalies and next checks.
 ```
 
-Invalid configuration stops startup. There is no hot reload, startup run, missed-run catch-up, or overlap suppression. Scheduled runs share the normal in-memory queue and `HOLMESGPT_MAX_CONCURRENCY` limit.
+Invalid configuration stops startup. A later Ask in the scheduled thread uses the Holmes default model like every other Ask. Requested model names may appear in structured logs but are not added to Slack messages or Prometheus labels. There is no hot reload, startup run, missed-run catch-up, or overlap suppression. Scheduled runs share the normal in-memory queue and `HOLMESGPT_MAX_CONCURRENCY` limit.
 
 ## Deployment
 
@@ -86,6 +87,7 @@ Configure schedules directly in Helm values. The chart renders non-empty values 
 scheduledInvestigations:
   - name: daily platform health
     schedule: "0 1 * * *"
+    model: scheduled
     prompt: |
       Investigate platform health and summarize anomalies and next checks.
 ```

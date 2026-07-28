@@ -35,6 +35,7 @@ type Message struct {
 
 type Request struct {
 	Ask                    string    `json:"ask"`
+	Model                  string    `json:"model,omitempty"`
 	ConversationHistory    []Message `json:"conversation_history,omitempty"`
 	AdditionalSystemPrompt string    `json:"additional_system_prompt,omitempty"`
 	RequestSource          string    `json:"request_source,omitempty"`
