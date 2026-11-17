@@ -77,7 +77,7 @@ A complete, non-empty user-visible analysis field parsed from Holmes API output 
 _Avoid_: Slack message, silently truncated answer, Failure Reply
 
 **Holmes Response Language**:
-The language policy for successful Holmes answers, expressed as `auto` or any non-empty language tag. `auto` is the default and leaves the language to Holmes. It does not govern AlertLens warnings, failure replies, or truncation notices.
+The language policy for successful Holmes answers, expressed as `auto` or any non-empty language tag. `auto` is the default and leaves the language to Holmes. Every Holmes request includes built-in STE reporting rules that inherit this language policy, with fixed Chinese and English vocabulary for work and verification status. The rules are compiled into AlertLens and require no separate configuration or skill loading. The language policy does not govern AlertLens warnings, failure replies, or truncation notices.
 _Avoid_: AlertLens language, interface locale
 
 **Stateless Processing**:

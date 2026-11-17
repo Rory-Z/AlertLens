@@ -64,6 +64,8 @@ go run ./cmd/alertlens
 
 The process exposes `/healthz`, `/readyz`, and Prometheus `/metrics` on port 9090 by default. Thread context is capped by `CONVERSATION_MAX_BYTES`, which defaults to 256 KiB; there is no turn-count limit. `HOLMES_RESPONSE_LANGUAGE` (Helm: `holmesResponseLanguage`) controls the language of successful Holmes answers; it defaults to `auto`, while values such as `zh-CN` add a system-level language directive.
 
+Every Holmes request includes the built-in [STE reporting rules](internal/service/ste.md), adapted from `dualface/ste-zh`. They require conclusions first, one fact per sentence, evidence, and explicit verification status. The rules use the configured response language: `zh-CN` selects Chinese vocabulary, `en` selects English, and `auto` leaves language selection to Holmes. They apply to Automatic Investigations, top-level and thread Asks, and Scheduled Investigations. The prompt is compiled into AlertLens; updating it requires rebuilding and deploying the application. These are model instructions, not an output validator; AlertLens's own messages retain their existing wording.
+
 Scheduled Investigations are optional. Set `SCHEDULED_INVESTIGATIONS_FILE` to a YAML file no larger than 1 MiB; an unset variable disables them. The mapping-root file is decoded strictly at startup, names must be unique single-line values of at most 80 characters, schedules use five-field cron in UTC, and prompts are passed literally to Holmes. An optional `model` selects a Holmes `modelList` name for the initial scheduled run; omit it to use the Holmes default. Explicitly blank values are invalid, and Holmes owns model validation and routing:
 
 ```yaml
