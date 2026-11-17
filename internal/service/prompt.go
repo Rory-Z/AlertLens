@@ -1,6 +1,7 @@
 package service
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -20,6 +21,9 @@ const (
 	slackAnswerMaxParts                = 10
 )
 
+//go:embed ste.md
+var stePrompt string
+
 var (
 	bearerPattern     = regexp.MustCompile(`(?i)(bearer\s+)[^\s]+`)
 	secretPattern     = regexp.MustCompile(`(?i)\b(token|password|secret|api[_-]?key)\s*[:=]\s*[^\s]+`)
@@ -27,11 +31,11 @@ var (
 )
 
 func holmesSystemPrompt(responseLanguage string) string {
-	return withResponseLanguage(investigationSystemPrompt, responseLanguage)
+	return withResponseLanguage(investigationSystemPrompt+"\n\n"+stePrompt, responseLanguage)
 }
 
 func scheduledHolmesSystemPrompt(responseLanguage string) string {
-	return withResponseLanguage(scheduledInvestigationSystemPrompt, responseLanguage)
+	return withResponseLanguage(scheduledInvestigationSystemPrompt+"\n\n"+stePrompt, responseLanguage)
 }
 
 func withResponseLanguage(prompt, responseLanguage string) string {

@@ -104,6 +104,15 @@ Language. Its default, `auto`, leaves language selection to Holmes; any other
 value adds a system-level response-language directive. AlertLens warnings and
 failure replies remain unchanged.
 
+Every Holmes request also activates the same built-in STE reporting rules:
+conclusion first, one fact per sentence, traceable evidence, and separate work
+and verification status. The rules inherit Holmes Response Language, including
+Chinese and English status vocabulary, without imposing a language when it is
+`auto`. They cover Automatic Investigations, all Asks, and Scheduled
+Investigations. The self-contained prompt is compiled into AlertLens and
+requires a rebuild to update; no runtime skill loading or extra configuration
+is required. Output compliance depends on the model following the instructions.
+
 ## Scheduled Investigation Semantics
 
 Each configured Scheduled Investigation has an installation-unique name, a

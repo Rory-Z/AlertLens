@@ -72,11 +72,90 @@ func TestFiringAlert(t *testing.T) {
 	}
 }
 
+func TestHolmesRequestsUseSTEInConfiguredLanguage(t *testing.T) {
+	alertmanagerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `[{"labels":{"alertname":"A","namespace":"ns"}}]`)
+	}))
+	defer alertmanagerServer.Close()
+
+	for _, path := range []string{"firing", "ask", "thread", "scheduled"} {
+		for _, language := range []string{"", "auto", "zh-CN", "en"} {
+			t.Run(path+"/"+language, func(t *testing.T) {
+				requests := make(chan holmes.Request, 1)
+				holmesServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var request holmes.Request
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Error(err)
+					}
+					requests <- request
+					_, _ = io.WriteString(w, `{"analysis":"answer"}`)
+				}))
+				defer holmesServer.Close()
+				slack := &fakeSlack{
+					rootTS:       "1",
+					conversation: []ConversationMessage{{Role: "user", Content: "root"}},
+				}
+				service := startService(t,
+					alertmanager.New(testURL(t, alertmanagerServer.URL), time.Second),
+					holmes.New(testURL(t, holmesServer.URL), time.Second), slack,
+					Config{MonitoredChannel: "C1", HolmesResponseLanguage: language})
+				event := Event{Channel: "C1", TS: "2", Text: "why?", Mention: true}
+				switch path {
+				case "firing":
+					event = firingEvent("2", "A", "ns")
+				case "thread":
+					event.ThreadTS = "1"
+				case "scheduled":
+					event.TS = "1"
+				}
+				var accepted bool
+				if path == "scheduled" {
+					accepted = service.SubmitScheduled(context.Background(), ScheduledInvestigation{
+						Name: "daily", Prompt: "Check platform health.",
+					})
+				} else {
+					accepted = service.Submit(context.Background(), event)
+				}
+				if !accepted {
+					t.Fatal("investigation was rejected")
+				}
+				waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:" + event.TS) })
+				request := <-requests
+				for _, rule := range []string{
+					"STE reporting rules are active for this request",
+					"One fact per sentence",
+					"已验证 | Verified",
+					"未验证 | Not verified",
+					"Do not mutate infrastructure.",
+				} {
+					if !strings.Contains(request.AdditionalSystemPrompt, rule) {
+						t.Errorf("system prompt is missing %q", rule)
+					}
+				}
+				if language == "" || language == "auto" {
+					if strings.Contains(request.AdditionalSystemPrompt, "Respond in ") {
+						t.Error("automatic language selection was overridden")
+					}
+				} else if !strings.Contains(request.AdditionalSystemPrompt, "Respond in "+language+".") {
+					t.Errorf("system prompt does not select %q", language)
+				}
+				if path == "thread" && (len(request.ConversationHistory) != 2 ||
+					request.ConversationHistory[0].Role != "system" ||
+					request.ConversationHistory[0].Content != request.AdditionalSystemPrompt) {
+					t.Error("thread history does not carry the current system prompt")
+				}
+			})
+		}
+	}
+}
+
 func TestEveryFiringNotificationRunsRCA(t *testing.T) {
 	var calls atomic.Int32
 	slack := &fakeSlack{}
 	service := startService(t, activeAlertmanager("A", "ns"), holmesFunc(func(_ context.Context, request holmes.Request) (string, error) {
-		if request.AdditionalSystemPrompt != investigationSystemPrompt+verifiedAlertPrompt {
+		if !strings.HasPrefix(request.AdditionalSystemPrompt, investigationSystemPrompt) ||
+			!strings.Contains(request.AdditionalSystemPrompt, "AlertLens verified") ||
+			strings.Contains(request.AdditionalSystemPrompt, "Respond in ") {
 			t.Errorf("system prompt = %q", request.AdditionalSystemPrompt)
 		}
 		calls.Add(1)
@@ -241,9 +320,8 @@ func TestAskReconstructsAndBoundsSlackConversationWithoutAlertmanager(t *testing
 	}
 	waitFor(t, func() bool { return slack.hasReaction("add:white_check_mark:C1:6") })
 	request := <-requestCh
-	wantPrompt := investigationSystemPrompt + " Respond in zh-CN."
 	wantHistory := []holmes.Message{
-		{Role: "system", Content: wantPrompt},
+		{Role: "system", Content: request.AdditionalSystemPrompt},
 		{Role: "user", Content: "root"},
 		{Role: "assistant", Content: "23"},
 		{Role: "user", Content: "45"},
@@ -252,7 +330,8 @@ func TestAskReconstructsAndBoundsSlackConversationWithoutAlertmanager(t *testing
 	if !slices.Equal(request.ConversationHistory, wantHistory) || request.RequestSource != "freeform" ||
 		request.SourceRef != "slack:C1:1" || request.ConversationID != "slack:C1:1" ||
 		request.Model != "" ||
-		request.AdditionalSystemPrompt != wantPrompt || !strings.Contains(request.Ask, "reply in E") ||
+		!strings.Contains(request.AdditionalSystemPrompt, "Respond in zh-CN.") ||
+		!strings.Contains(request.Ask, "reply in E") ||
 		len(slack.conversationLog()) != 1 {
 		t.Fatalf("request = %#v, conversation calls = %#v", request, slack.conversationLog())
 	}
@@ -506,7 +585,8 @@ func TestScheduledInvestigationCreatesRootAndRepliesInThread(t *testing.T) {
 	if request.Ask != investigation.Prompt || request.RequestSource != "scheduled_investigation" ||
 		request.SourceRef != "schedule:daily health" || request.ConversationID != "slack:C1:100.1" ||
 		request.Model != "scheduled" ||
-		request.AdditionalSystemPrompt != "Investigate using read-only tools. Do not mutate infrastructure. Respond in zh-CN." ||
+		!strings.HasPrefix(request.AdditionalSystemPrompt, "Investigate using read-only tools. Do not mutate infrastructure.") ||
+		!strings.Contains(request.AdditionalSystemPrompt, "Respond in zh-CN.") ||
 		len(request.ConversationHistory) != 0 {
 		t.Fatalf("Holmes request = %#v", request)
 	}
@@ -696,7 +776,7 @@ func TestAskWaitsForScheduledInvestigationAndUsesSlackHistory(t *testing.T) {
 	initial := <-requests
 	followUp := <-requests
 	wantHistory := []holmes.Message{
-		{Role: "system", Content: investigationSystemPrompt},
+		{Role: "system", Content: followUp.AdditionalSystemPrompt},
 		{Role: "user", Content: "Scheduled investigation started: daily health"},
 		{Role: "assistant", Content: "initial answer"},
 	}
