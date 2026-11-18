@@ -8,24 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/emqx/alertlens/internal/config"
-	"github.com/emqx/alertlens/internal/service"
+	"github.com/emqx/alertlens/internal/slackmsg"
 )
 
 func TestRunRejectsInvalidConfig(t *testing.T) {
 	if err := run(context.Background(), func(string) string { return "" }); err == nil {
 		t.Fatal("expected error")
-	}
-}
-
-func TestServiceScheduledInvestigationsPreserveModel(t *testing.T) {
-	model := " scheduled "
-	got := toServiceScheduledInvestigations([]config.ScheduledInvestigation{{
-		Name: "daily", Schedule: "0 1 * * *", Prompt: "investigate", Model: &model,
-	}})
-	if len(got) != 1 || got[0].Name != "daily" || got[0].Schedule != "0 1 * * *" ||
-		got[0].Prompt != "investigate" || got[0].Model != model {
-		t.Fatalf("scheduled investigations = %#v", got)
 	}
 }
 
@@ -107,7 +95,7 @@ type fakeSlackRunner struct {
 	returnImmediately bool
 }
 
-func (f *fakeSlackRunner) Run(ctx context.Context, _ func(context.Context, service.Event) bool) error {
+func (f *fakeSlackRunner) Run(ctx context.Context, _ func(context.Context, slackmsg.Event) bool) error {
 	if f.runErr != nil || f.returnImmediately {
 		return f.runErr
 	}
@@ -119,8 +107,8 @@ func (f *fakeSlackRunner) Ready() error { return f.readyErr }
 
 type fakeWorker struct{}
 
-func (fakeWorker) Submit(context.Context, service.Event) bool { return true }
-func (fakeWorker) Run(ctx context.Context)                    { <-ctx.Done() }
+func (fakeWorker) Submit(context.Context, slackmsg.Event) bool { return true }
+func (fakeWorker) Run(ctx context.Context)                     { <-ctx.Done() }
 
 func waitHTTPStatus(t *testing.T, target string, want int) {
 	t.Helper()

@@ -15,5 +15,5 @@ case "$1" in
     ;;
 esac
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 sed "s/__ALERTLENS_APP_NAME__/$app_name/g" "$repo_root/deploy/slack/app-manifest.yaml"

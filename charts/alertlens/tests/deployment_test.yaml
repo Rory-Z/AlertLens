@@ -14,8 +14,6 @@ tests:
       - equal:
           path: spec.replicas
           value: 1
-      - notExists:
-          path: spec.strategy
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false

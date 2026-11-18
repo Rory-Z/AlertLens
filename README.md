@@ -152,7 +152,10 @@ The defaults are:
 | `E2E_ALERTMANAGER_LOCAL_PORT` | `19093` |
 | `E2E_HOLMES_NAMESPACE` | `holmes` |
 | `E2E_HOLMES_URL` | `http://holmes-holmes.holmes.svc:80` |
-| `E2E_HOLMES_PORT` | `80` |
+| `E2E_HOLMES_PORT` | `5050` |
+
+`E2E_HOLMES_PORT` is the destination Pod port allowed by NetworkPolicy.
+`E2E_HOLMES_URL` uses the Service port, which can differ from the Pod port.
 
 Create the namespace before provisioning the Secret. Every default is a Make
 variable and can be overridden on the command line; an exported `KUBECONFIG`
@@ -204,6 +207,10 @@ overall test process.
 
 Follow the [testing guidelines](CONTRIBUTING.md#testing) for TDD, integration
 coverage, and the testing trophy.
+
+Install Helm to run the complete test suite. The chart contract test renders
+Scheduled Investigations and loads the rendered configuration with the application
+loader; it skips when Helm is unavailable. CI installs Helm and runs this test.
 
 ```bash
 test -z "$(gofmt -l .)"

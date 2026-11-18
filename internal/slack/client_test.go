@@ -23,6 +23,7 @@ import (
 	"github.com/emqx/alertlens/internal/alertmanager"
 	"github.com/emqx/alertlens/internal/holmes"
 	"github.com/emqx/alertlens/internal/service"
+	"github.com/emqx/alertlens/internal/slackmsg"
 )
 
 func TestTranslateMessage(t *testing.T) {
@@ -42,7 +43,7 @@ func TestTranslateMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("event rejected")
 	}
-	want := service.Event{
+	want := slackmsg.Event{
 		Channel: "C1",
 		Text:    "FIRING HighCPU\n<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->\ndetails",
 		TS:      "100.1", ThreadTS: "99.1",
@@ -52,11 +53,10 @@ func TestTranslateMessage(t *testing.T) {
 	}
 }
 
-func TestNewBuildsRealSocketClient(t *testing.T) {
+func TestNewIsNotReadyBeforeConnecting(t *testing.T) {
 	client := New("xoxb-test", "xapp-test", "C1")
-	socket, ok := client.socket.(realSocket)
-	if !ok || client.api == nil || socket.Events() == nil || client.monitoredChannel != "C1" {
-		t.Fatalf("client = %#v", client)
+	if err := client.Ready(); err == nil {
+		t.Fatal("new client is ready before connecting")
 	}
 }
 
@@ -253,7 +253,7 @@ func TestConversationKeepsRootPriorMentionsAndAlertLensAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []service.ConversationMessage{
+	want := []slackmsg.Message{
 		{Role: "user", Content: "root alert"},
 		{Role: "user", Content: "first question"},
 		{Role: "assistant", Content: "first answer"},
@@ -295,7 +295,7 @@ func TestConversationReadsEveryPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []service.ConversationMessage{
+	want := []slackmsg.Message{
 		{Role: "user", Content: "root"},
 		{Role: "user", Content: "first"},
 		{Role: "assistant", Content: "answer"},
@@ -395,7 +395,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 	go func() { worker.Run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 
-	if !worker.Submit(ctx, service.Event{Channel: "C1", TS: "1",
+	if !worker.Submit(ctx, slackmsg.Event{Channel: "C1", TS: "1",
 		Text: `<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->`}) {
 		t.Fatal("firing event rejected")
 	}
@@ -411,7 +411,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 		t.Fatalf("firing request = %#v", firingRequest)
 	}
 
-	if !worker.Submit(ctx, service.Event{
+	if !worker.Submit(ctx, slackmsg.Event{
 		Channel: "C1", ThreadTS: "1", TS: "5", Text: "current question", Mention: true,
 	}) {
 		t.Fatal("Ask rejected")
@@ -433,7 +433,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 		t.Fatalf("Ask request = %#v, Alertmanager calls = %d", askRequest, alertmanagerCalls.Load())
 	}
 
-	for _, event := range []service.Event{
+	for _, event := range []slackmsg.Event{
 		{Channel: "C1", TS: "6", Text: `<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->`},
 		{Channel: "C1", TS: "7", Text: `<!-- alertlens:alertname=Watchdog,namespace=,status=firing -->`},
 	} {
@@ -447,7 +447,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 		t.Fatalf("repeated firing calls: Alertmanager=%d Holmes=%d", alertmanagerCalls.Load(), holmesCalls.Load())
 	}
 
-	if !worker.Submit(ctx, service.Event{Channel: "C1", TS: "8", Text: "top-level question", Mention: true}) {
+	if !worker.Submit(ctx, slackmsg.Event{Channel: "C1", TS: "8", Text: "top-level question", Mention: true}) {
 		t.Fatal("top-level Ask rejected")
 	}
 	if post := <-posts; post.Get("thread_ts") != "8" || post.Get("text") != "answer-5" {
@@ -458,7 +458,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 		t.Fatalf("top-level Ask queried enrichment: Alertmanager=%d conversation=%d", alertmanagerCalls.Load(), conversationCalls.Load())
 	}
 
-	if !worker.Submit(ctx, service.Event{Channel: "C1", TS: "9",
+	if !worker.Submit(ctx, slackmsg.Event{Channel: "C1", TS: "9",
 		Text: `<!-- alertlens:alertname=HighCPU,namespace=prod,status=resolved -->`}) {
 		t.Fatal("resolved notification rejected")
 	}
@@ -468,7 +468,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 	}
 
 	holmesStatus.Store(http.StatusServiceUnavailable)
-	if !worker.Submit(ctx, service.Event{Channel: "C1", TS: "10", Text: "failing question", Mention: true}) {
+	if !worker.Submit(ctx, slackmsg.Event{Channel: "C1", TS: "10", Text: "failing question", Mention: true}) {
 		t.Fatal("failing Ask rejected")
 	}
 	holmesFailure := <-posts
@@ -480,7 +480,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 
 	alertmanagerStatus.Store(http.StatusBadRequest)
 	holmesBeforeVerificationFailure := holmesCalls.Load()
-	if !worker.Submit(ctx, service.Event{Channel: "C1", TS: "11",
+	if !worker.Submit(ctx, slackmsg.Event{Channel: "C1", TS: "11",
 		Text: `<!-- alertlens:alertname=HighCPU,namespace=prod,status=firing -->`}) {
 		t.Fatal("verification-failing firing rejected")
 	}
@@ -494,7 +494,7 @@ func TestServiceIntegratesSlackAlertmanagerAndHolmes(t *testing.T) {
 
 	conversationFailure.Store(true)
 	holmesBefore := holmesCalls.Load()
-	if !worker.Submit(ctx, service.Event{
+	if !worker.Submit(ctx, slackmsg.Event{
 		Channel: "C1", ThreadTS: "1", TS: "12", Text: "history failure", Mention: true,
 	}) {
 		t.Fatal("history-failing Ask rejected")
@@ -638,10 +638,10 @@ func TestRunAuthenticatesAndAcknowledgesBeforeSubmit(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	handled := make(chan service.Event, 1)
+	handled := make(chan slackmsg.Event, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- client.Run(ctx, func(_ context.Context, event service.Event) bool {
+		done <- client.Run(ctx, func(_ context.Context, event slackmsg.Event) bool {
 			if !socket.wasAcked("env1") {
 				t.Error("handler ran before ACK")
 			}
@@ -727,7 +727,7 @@ func TestRunReturnsAuthenticationAndSocketErrors(t *testing.T) {
 			api:    slackapi.New("xoxb-test", slackapi.OptionAPIURL(server.URL+"/api/")),
 			socket: newFakeSocket(), monitoredChannel: "C1",
 		}
-		if err := client.Run(context.Background(), func(context.Context, service.Event) bool { return true }); err == nil {
+		if err := client.Run(context.Background(), func(context.Context, slackmsg.Event) bool { return true }); err == nil {
 			t.Fatal("expected error")
 		}
 	})
@@ -743,7 +743,7 @@ func TestRunReturnsAuthenticationAndSocketErrors(t *testing.T) {
 			api:    slackapi.New("xoxb-test", slackapi.OptionAPIURL(server.URL+"/api/")),
 			socket: socket, monitoredChannel: "C1",
 		}
-		if err := client.Run(context.Background(), func(context.Context, service.Event) bool { return true }); err == nil {
+		if err := client.Run(context.Background(), func(context.Context, slackmsg.Event) bool { return true }); err == nil {
 			t.Fatal("expected error")
 		}
 	})

@@ -19,6 +19,7 @@ import (
 	"github.com/emqx/alertlens/internal/observability"
 	"github.com/emqx/alertlens/internal/service"
 	slackadapter "github.com/emqx/alertlens/internal/slack"
+	"github.com/emqx/alertlens/internal/slackmsg"
 )
 
 func main() {
@@ -47,7 +48,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			RunbookMaxBytes:      cfg.RunbookMaxBytes, ConversationMaxBytes: cfg.ConversationMaxBytes,
 			HolmesResponseLanguage:  cfg.HolmesResponseLanguage,
 			MonitoredChannel:        cfg.MonitoredChannel,
-			ScheduledInvestigations: toServiceScheduledInvestigations(cfg.ScheduledInvestigations),
+			ScheduledInvestigations: cfg.ScheduledInvestigations,
 		},
 		metrics,
 	)
@@ -62,26 +63,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	return serve(ctx, listener, metrics.Handler(), slackClient, worker)
 }
 
-func toServiceScheduledInvestigations(in []config.ScheduledInvestigation) []service.ScheduledInvestigation {
-	out := make([]service.ScheduledInvestigation, len(in))
-	for i, investigation := range in {
-		out[i] = service.ScheduledInvestigation{
-			Name: investigation.Name, Schedule: investigation.Schedule, Prompt: investigation.Prompt,
-		}
-		if investigation.Model != nil {
-			out[i].Model = *investigation.Model
-		}
-	}
-	return out
-}
-
 type slackRunner interface {
-	Run(context.Context, func(context.Context, service.Event) bool) error
+	Run(context.Context, func(context.Context, slackmsg.Event) bool) error
 	Ready() error
 }
 
 type workerRunner interface {
-	Submit(context.Context, service.Event) bool
+	Submit(context.Context, slackmsg.Event) bool
 	Run(context.Context)
 }
 

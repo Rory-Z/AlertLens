@@ -8,6 +8,8 @@ fi
 
 case "$1" in
   deploy)
+    # The Makefile supplies IMAGE as an environment input.
+    # shellcheck disable=SC2153
     image=$IMAGE
     case "$image" in
       *@*)

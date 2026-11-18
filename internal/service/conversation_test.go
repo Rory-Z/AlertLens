@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"github.com/emqx/alertlens/internal/holmes"
+	"github.com/emqx/alertlens/internal/slackmsg"
 )
 
 func TestBoundConversationKeepsRootAndNewestWithinByteBudget(t *testing.T) {
-	messages := []ConversationMessage{
+	messages := []slackmsg.Message{
 		{Role: "user", Content: "root"},
 		{Role: "user", Content: "01"},
 		{Role: "assistant", Content: "23"},
@@ -17,7 +18,7 @@ func TestBoundConversationKeepsRootAndNewestWithinByteBudget(t *testing.T) {
 	}
 
 	got := boundConversation(messages, 10)
-	want := []ConversationMessage{
+	want := []slackmsg.Message{
 		{Role: "user", Content: "root"},
 		{Role: "assistant", Content: "23"},
 		{Role: "user", Content: "45"},
@@ -29,9 +30,9 @@ func TestBoundConversationKeepsRootAndNewestWithinByteBudget(t *testing.T) {
 }
 
 func TestBoundConversationHasNoTurnLimit(t *testing.T) {
-	messages := make([]ConversationMessage, 50)
+	messages := make([]slackmsg.Message, 50)
 	for i := range messages {
-		messages[i] = ConversationMessage{Role: "user", Content: "x"}
+		messages[i] = slackmsg.Message{Role: "user", Content: "x"}
 	}
 
 	if got := boundConversation(messages, 50); len(got) != 50 {
@@ -40,12 +41,12 @@ func TestBoundConversationHasNoTurnLimit(t *testing.T) {
 }
 
 func TestBoundConversationTruncatesNewestMessageAtBudget(t *testing.T) {
-	messages := []ConversationMessage{
+	messages := []slackmsg.Message{
 		{Role: "user", Content: "root"},
 		{Role: "user", Content: "old"},
 		{Role: "assistant", Content: "newest message"},
 	}
-	want := []ConversationMessage{
+	want := []slackmsg.Message{
 		{Role: "user", Content: "root"},
 		{Role: "assistant", Content: "newest"},
 	}
@@ -56,7 +57,7 @@ func TestBoundConversationTruncatesNewestMessageAtBudget(t *testing.T) {
 
 func TestConversationHistoryStartsWithSystemAndSanitizesMessages(t *testing.T) {
 	history := conversationHistory(boundConversation(
-		[]ConversationMessage{{Role: "assistant", Content: "token: secret"}}, 1024), investigationSystemPrompt)
+		[]slackmsg.Message{{Role: "assistant", Content: "token: secret"}}, 1024), investigationSystemPrompt)
 	want := []holmes.Message{
 		{Role: "system", Content: investigationSystemPrompt},
 		{Role: "assistant", Content: "token=[REDACTED]"},
@@ -67,7 +68,7 @@ func TestConversationHistoryStartsWithSystemAndSanitizesMessages(t *testing.T) {
 }
 
 func TestBoundConversationAppliesByteLimitAfterSanitizing(t *testing.T) {
-	bounded := boundConversation([]ConversationMessage{{Role: "user", Content: "token=x"}}, 10)
+	bounded := boundConversation([]slackmsg.Message{{Role: "user", Content: "token=x"}}, 10)
 	history := conversationHistory(bounded, investigationSystemPrompt)
 	if got := history[1].Content; got != "token=[RED" || len(got) > 10 {
 		t.Fatalf("bounded sanitized content = %q (%d bytes)", got, len(got))
