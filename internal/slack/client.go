@@ -12,7 +12,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
-	"github.com/emqx/alertlens/internal/service"
+	"github.com/emqx/alertlens/internal/slackmsg"
 )
 
 type socketConnection interface {
@@ -43,7 +43,7 @@ func New(botToken, appToken, monitoredChannel string) *Client {
 	}
 }
 
-func (c *Client) Run(ctx context.Context, handler func(context.Context, service.Event) bool) error {
+func (c *Client) Run(ctx context.Context, handler func(context.Context, slackmsg.Event) bool) error {
 	auth, err := c.api.AuthTestContext(ctx)
 	if err != nil {
 		return fmt.Errorf("Slack auth.test: %w", err)
@@ -103,7 +103,7 @@ func (c *Client) Post(ctx context.Context, channel, text string) (string, error)
 	return timestamp, err
 }
 
-func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS string) ([]service.ConversationMessage, error) {
+func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS string) ([]slackmsg.Message, error) {
 	var all []slackapi.Message
 	cursor := ""
 	for {
@@ -126,7 +126,7 @@ func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS 
 		}
 		cursor = next
 	}
-	result := make([]service.ConversationMessage, 0, len(all))
+	result := make([]slackmsg.Message, 0, len(all))
 	for _, message := range all {
 		if message.Timestamp == currentTS {
 			continue
@@ -134,26 +134,16 @@ func (c *Client) Conversation(ctx context.Context, channel, threadTS, currentTS 
 		text := messageText(message)
 		switch {
 		case message.Timestamp == threadTS:
-			result = append(result, service.ConversationMessage{Role: "user", Content: text})
-		case (message.User == c.botUserID || (c.botID != "" && message.BotID == c.botID)) && !failureReply(text):
-			result = append(result, service.ConversationMessage{Role: "assistant", Content: text})
+			result = append(result, slackmsg.Message{Role: "user", Content: text})
+		case (message.User == c.botUserID || (c.botID != "" && message.BotID == c.botID)) && !slackmsg.IsFailure(text):
+			result = append(result, slackmsg.Message{Role: "assistant", Content: text})
 		case strings.Contains(text, "<@"+c.botUserID+">"):
-			result = append(result, service.ConversationMessage{
+			result = append(result, slackmsg.Message{
 				Role: "user", Content: strings.TrimSpace(strings.ReplaceAll(text, "<@"+c.botUserID+">", "")),
 			})
 		}
 	}
 	return result, nil
-}
-
-func failureReply(text string) bool {
-	const legacyAlertmanagerFailureReplyPrefix = "⚠️ Alertmanager enrichment failed:"
-	return strings.HasPrefix(text, service.AlertmanagerFailureReplyPrefix) ||
-		strings.HasPrefix(text, legacyAlertmanagerFailureReplyPrefix) ||
-		strings.HasPrefix(text, service.HolmesFailureReplyPrefix) ||
-		strings.HasPrefix(text, service.HolmesAnswerDeliveryFailureReplyPrefix) ||
-		strings.HasPrefix(text, service.ScheduledFailureReplyPrefix) ||
-		text == service.ShutdownReply
 }
 
 func messageText(message slackapi.Message) string {
@@ -167,7 +157,7 @@ func messageText(message slackapi.Message) string {
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
-func (c *Client) consume(ctx context.Context, handler func(context.Context, service.Event) bool) {
+func (c *Client) consume(ctx context.Context, handler func(context.Context, slackmsg.Event) bool) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -195,13 +185,13 @@ func (c *Client) consume(ctx context.Context, handler func(context.Context, serv
 	}
 }
 
-func translate(event slackevents.EventsAPIEvent, monitoredChannel, botUserID string) (service.Event, bool) {
+func translate(event slackevents.EventsAPIEvent, monitoredChannel, botUserID string) (slackmsg.Event, bool) {
 	switch inner := event.InnerEvent.Data.(type) {
 	case *slackevents.MessageEvent:
 		return translateMessage(inner, monitoredChannel, botUserID)
 	case *slackevents.AppMentionEvent:
 		if inner.Channel != monitoredChannel || inner.User == botUserID || inner.TimeStamp == "" {
-			return service.Event{}, false
+			return slackmsg.Event{}, false
 		}
 		text := strings.TrimSpace(strings.ReplaceAll(inner.Text, "<@"+botUserID+">", ""))
 		parts := make([]string, 0, 1+len(inner.Attachments))
@@ -214,22 +204,22 @@ func translate(event slackevents.EventsAPIEvent, monitoredChannel, botUserID str
 			}
 		}
 		if len(parts) == 0 {
-			return service.Event{}, false
+			return slackmsg.Event{}, false
 		}
-		return service.Event{
+		return slackmsg.Event{
 			Channel: inner.Channel,
 			Text:    strings.Join(parts, "\n"), TS: inner.TimeStamp, ThreadTS: inner.ThreadTimeStamp,
 			Mention: true,
 		}, true
 	default:
-		return service.Event{}, false
+		return slackmsg.Event{}, false
 	}
 }
 
-func translateMessage(message *slackevents.MessageEvent, monitoredChannel, botUserID string) (service.Event, bool) {
+func translateMessage(message *slackevents.MessageEvent, monitoredChannel, botUserID string) (slackmsg.Event, bool) {
 	if (message.SubType != "" && message.SubType != "bot_message") ||
 		message.BotID == "" || message.Channel != monitoredChannel || message.User == botUserID || message.TimeStamp == "" {
-		return service.Event{}, false
+		return slackmsg.Event{}, false
 	}
 	parts := make([]string, 0, 3)
 	if message.Text != "" {
@@ -245,9 +235,9 @@ func translateMessage(message *slackevents.MessageEvent, monitoredChannel, botUs
 		}
 	}
 	if len(parts) == 0 {
-		return service.Event{}, false
+		return slackmsg.Event{}, false
 	}
-	return service.Event{
+	return slackmsg.Event{
 		Channel: message.Channel,
 		Text:    strings.Join(parts, "\n"), TS: message.TimeStamp, ThreadTS: message.ThreadTimeStamp,
 	}, true

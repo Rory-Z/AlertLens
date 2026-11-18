@@ -1,70 +1,85 @@
 package observability
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
-func TestMetricsExposeBoundedLabels(t *testing.T) {
+func TestMetricsExposeBoundedLabelsAndValues(t *testing.T) {
 	metrics := New()
 	metrics.Event("accepted")
+	metrics.Event("accepted")
 	metrics.Reaction("add", "success")
-	metrics.Alertmanager("success", time.Second)
-	metrics.Holmes("error", 2*time.Second)
+	metrics.Alertmanager("success", 1500*time.Millisecond)
+	metrics.Holmes("error", 2500*time.Millisecond)
 	metrics.ScheduledInvestigation("success")
+	metrics.QueueDepth(7)
 	metrics.QueueDepth(2)
-	metrics.HolmesActive(1)
+	metrics.HolmesActive(2)
+	metrics.HolmesActive(-1)
 
-	families, err := metrics.registry.Gather()
+	w := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	families, err := parser.TextToMetricFamilies(w.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{
-		"alertlens_events_total":                          false,
-		"alertlens_reactions_total":                       false,
-		"alertlens_alertmanager_requests_total":           false,
-		"alertlens_alertmanager_request_duration_seconds": false,
-		"alertlens_holmes_requests_total":                 false,
-		"alertlens_holmes_request_duration_seconds":       false,
-		"alertlens_scheduled_investigations_total":        false,
-		"alertlens_queue_depth":                           false,
-		"alertlens_holmes_active":                         false,
+	want := map[string]struct {
+		kind   string
+		labels map[string]string
+		value  float64
+	}{
+		"alertlens_events_total":                          {"COUNTER", map[string]string{"outcome": "accepted"}, 2},
+		"alertlens_reactions_total":                       {"COUNTER", map[string]string{"operation": "add", "outcome": "success"}, 1},
+		"alertlens_alertmanager_requests_total":           {"COUNTER", map[string]string{"outcome": "success"}, 1},
+		"alertlens_alertmanager_request_duration_seconds": {"HISTOGRAM", nil, 1.5},
+		"alertlens_holmes_requests_total":                 {"COUNTER", map[string]string{"outcome": "error"}, 1},
+		"alertlens_holmes_request_duration_seconds":       {"HISTOGRAM", nil, 2.5},
+		"alertlens_scheduled_investigations_total":        {"COUNTER", map[string]string{"outcome": "success"}, 1},
+		"alertlens_queue_depth":                           {"GAUGE", nil, 2},
+		"alertlens_holmes_active":                         {"GAUGE", nil, 1},
 	}
-	for _, family := range families {
-		for _, removed := range []string{"persistence", "sessions", "watchdog"} {
-			if strings.Contains(family.GetName(), removed) {
-				t.Fatalf("removed metric %s is still registered", family.GetName())
+	if len(families) != len(want) {
+		t.Fatalf("metric families = %d, want %d", len(families), len(want))
+	}
+	for name, expected := range want {
+		family := families[name]
+		if family == nil || len(family.Metric) != 1 || family.GetType().String() != expected.kind {
+			t.Errorf("metric %s = %v", name, family)
+			continue
+		}
+		metric := family.Metric[0]
+		labels := make(map[string]string, len(metric.Label))
+		for _, label := range metric.Label {
+			labels[label.GetName()] = label.GetValue()
+		}
+		if !maps.Equal(labels, expected.labels) {
+			t.Errorf("metric %s labels = %v, want %v", name, labels, expected.labels)
+		}
+		var value float64
+		switch expected.kind {
+		case "COUNTER":
+			value = metric.GetCounter().GetValue()
+		case "GAUGE":
+			value = metric.GetGauge().GetValue()
+		case "HISTOGRAM":
+			value = metric.GetHistogram().GetSampleSum()
+			if metric.GetHistogram().GetSampleCount() != 1 {
+				t.Errorf("metric %s count = %d, want 1", name, metric.GetHistogram().GetSampleCount())
 			}
 		}
-		if _, ok := want[family.GetName()]; ok {
-			want[family.GetName()] = true
+		if value != expected.value {
+			t.Errorf("metric %s value = %v, want %v", name, value, expected.value)
 		}
-		for _, metric := range family.Metric {
-			for _, label := range metric.Label {
-				for _, forbidden := range []string{"alertname", "namespace", "channel", "thread", "event", "url"} {
-					if strings.Contains(strings.ToLower(label.GetName()), forbidden) {
-						t.Fatalf("metric %s has forbidden label %s", family.GetName(), label.GetName())
-					}
-				}
-			}
-		}
-	}
-	for name, found := range want {
-		if !found {
-			t.Errorf("metric %s was not gathered", name)
-		}
-	}
-}
-
-func TestHandlerServesPrivateRegistry(t *testing.T) {
-	metrics := New()
-	metrics.Event("accepted")
-	w := httptest.NewRecorder()
-	metrics.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `alertlens_events_total{outcome="accepted"} 1`) {
-		t.Fatalf("response = %d %q", w.Code, w.Body.String())
 	}
 }

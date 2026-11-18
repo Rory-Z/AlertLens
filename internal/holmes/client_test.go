@@ -147,22 +147,29 @@ func TestChatReturnsAnalysisWithMalformedEnvelope(t *testing.T) {
 	}
 }
 
-func TestChatBoundsOversizedAnalysisReads(t *testing.T) {
-	client := New(holmesURL(t, "http://holmes.invalid"), 15*time.Second)
-	client.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
-		body := `{"analysis":"` + strings.Repeat("x", 4<<20+1) + `"}`
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body: io.NopCloser(&maxReadSizeReader{
-				reader: strings.NewReader(body),
-				max:    64 << 10,
-			}),
-		}, nil
-	})
-
-	got, err := client.Chat(context.Background(), Request{Ask: "x"})
-	if got == "" || !errors.Is(err, ErrAnalysisTooLarge) {
-		t.Fatalf("Chat() = (%d bytes, %v)", len(got), err)
+func TestChatReturnsCompleteUTF8PrefixForOversizedAnalysis(t *testing.T) {
+	const limit = 4 << 20
+	for _, tt := range []struct {
+		name     string
+		analysis string
+		want     string
+	}{
+		{name: "ASCII", analysis: strings.Repeat("x", limit+1), want: strings.Repeat("x", limit)},
+		{name: "UTF-8 followed by ASCII", analysis: strings.Repeat("界", limit/3+1) + "x", want: strings.Repeat("界", limit/3)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client := New(holmesURL(t, "http://holmes.invalid"), 15*time.Second)
+			client.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"analysis":"` + tt.analysis + `"}`)),
+				}, nil
+			})
+			got, err := client.Chat(context.Background(), Request{Ask: "x"})
+			if got != tt.want || !errors.Is(err, ErrAnalysisTooLarge) {
+				t.Fatalf("Chat() = (%d bytes, %v), want a %d-byte UTF-8 prefix and ErrAnalysisTooLarge", len(got), err, len(tt.want))
+			}
+		})
 	}
 }
 
@@ -205,8 +212,6 @@ func TestChatRejectsBadResponses(t *testing.T) {
 	}{
 		{name: "malformed", body: "{", want: "decode Holmes response"},
 		{name: "empty analysis", body: `{"analysis":""}`, want: "empty analysis"},
-		{name: "oversized", body: `{"analysis":"` + strings.Repeat("x", 4<<20+1) + `"}`,
-			want: "holmes analysis exceeds 4194304 bytes"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -244,18 +249,6 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
-}
-
-type maxReadSizeReader struct {
-	reader io.Reader
-	max    int
-}
-
-func (r *maxReadSizeReader) Read(p []byte) (int, error) {
-	if len(p) > r.max {
-		return 0, io.ErrShortBuffer
-	}
-	return r.reader.Read(p)
 }
 
 func holmesURL(t *testing.T, raw string) *url.URL {

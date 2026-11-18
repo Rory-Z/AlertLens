@@ -4,6 +4,8 @@ set -eu
 deployments=$(kubectl -n "$E2E_NAMESPACE" get deployment \
   -l 'app.kubernetes.io/name=alertlens' \
   -o name)
+# kubectl returns one whitespace-free Kubernetes resource name per line.
+# shellcheck disable=SC2086
 set -- $deployments
 if [ "$#" -ne 1 ]; then
   echo "expected one AlertLens deployment in $E2E_NAMESPACE, found $#" >&2

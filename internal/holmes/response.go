@@ -180,10 +180,7 @@ func (d *responseDecoder) readStringContent(limit int) (string, bool, error) {
 			}
 		}
 		size := utf8.RuneLen(r)
-		if size < 0 {
-			r, size = utf8.RuneError, utf8.RuneLen(utf8.RuneError)
-		}
-		if value.Len()+size <= limit {
+		if !tooLarge && value.Len()+size <= limit {
 			_, _ = value.WriteRune(r)
 		} else {
 			tooLarge = true
@@ -254,7 +251,7 @@ func parseHexRune(encoded []byte) (rune, bool) {
 func (d *responseDecoder) skipNumber(first byte) error {
 	if first == '-' {
 		var err error
-		first, err = d.takeByte()
+		first, err = d.reader.ReadByte()
 		if err != nil {
 			return err
 		}
@@ -269,16 +266,16 @@ func (d *responseDecoder) skipNumber(first byte) error {
 		return errors.New("invalid JSON number")
 	}
 	if next, err := d.peekByte(); err == nil && next == '.' {
-		_, _ = d.takeByte()
+		_, _ = d.reader.ReadByte()
 		if err := d.takeRequiredDigit(); err != nil {
 			return err
 		}
 		d.takeDigits()
 	}
 	if next, err := d.peekByte(); err == nil && (next == 'e' || next == 'E') {
-		_, _ = d.takeByte()
+		_, _ = d.reader.ReadByte()
 		if next, err = d.peekByte(); err == nil && (next == '+' || next == '-') {
-			_, _ = d.takeByte()
+			_, _ = d.reader.ReadByte()
 		}
 		if err := d.takeRequiredDigit(); err != nil {
 			return err
@@ -292,7 +289,7 @@ func (d *responseDecoder) skipNumber(first byte) error {
 }
 
 func (d *responseDecoder) takeRequiredDigit() error {
-	digit, err := d.takeByte()
+	digit, err := d.reader.ReadByte()
 	if err != nil {
 		return err
 	}
@@ -308,7 +305,7 @@ func (d *responseDecoder) takeDigits() {
 		if err != nil || next < '0' || next > '9' {
 			return
 		}
-		_, _ = d.takeByte()
+		_, _ = d.reader.ReadByte()
 	}
 }
 
@@ -367,8 +364,6 @@ func (d *responseDecoder) peekNonSpace() (byte, error) {
 		_, _ = d.reader.Discard(1)
 	}
 }
-
-func (d *responseDecoder) takeByte() (byte, error) { return d.reader.ReadByte() }
 
 func (d *responseDecoder) peekByte() (byte, error) {
 	next, err := d.reader.Peek(1)
