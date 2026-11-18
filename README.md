@@ -208,9 +208,11 @@ overall test process.
 Follow the [testing guidelines](CONTRIBUTING.md#testing) for TDD, integration
 coverage, and the testing trophy.
 
-Install Helm to run the complete test suite. The chart contract test renders
-Scheduled Investigations and loads the rendered configuration with the application
-loader; it skips when Helm is unavailable. CI installs Helm and runs this test.
+The complete test suite uses Helm, GNU Make (as `make`), and `/bin/sh`.
+The chart contract test renders Scheduled Investigations and loads them with
+the application loader. The script tests exercise E2E deployment arguments
+and Slack manifest rendering. Tests that lack these tools skip locally.
+GitHub Actions requires the tools and runs these tests.
 
 ```bash
 test -z "$(gofmt -l .)"

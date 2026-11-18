@@ -41,6 +41,7 @@ type slackManifest struct {
 }
 
 func TestSlackManifestEnvironments(t *testing.T) {
+	requirePOSIXShell(t)
 	wantNames := map[string]string{"dev": "AlertLens Dev", "prod": "AlertLens"}
 	wantScopes := []string{
 		"app_mentions:read", "channels:history", "groups:history", "chat:write",
@@ -84,6 +85,7 @@ func TestSlackManifestEnvironments(t *testing.T) {
 }
 
 func TestSlackManifestRejectsUnknownEnvironment(t *testing.T) {
+	requirePOSIXShell(t)
 	for _, arguments := range [][]string{nil, {"staging"}, {"dev", "ignored"}} {
 		var stdout bytes.Buffer
 		command := exec.Command("./scripts/render-slack-manifest", arguments...)
