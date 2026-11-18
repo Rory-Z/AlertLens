@@ -16,6 +16,9 @@ func TestE2EDeployUsesHolmesPodPort(t *testing.T) {
 	requireScriptTool(t, "GNU Make available as make", err == nil && strings.HasPrefix(string(version), "GNU Make "))
 
 	dir := t.TempDir()
+	if strings.ContainsRune(dir, os.PathListSeparator) {
+		t.Fatalf("stub directory %q contains the PATH separator %q", dir, os.PathListSeparator)
+	}
 	for name, script := range map[string]string{
 		"kubectl": "#!/bin/sh\nprintf '%s' placeholder\n",
 		"helm":    "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DELIVERY_HELM_ARGS\"\n",
@@ -27,7 +30,7 @@ func TestE2EDeployUsesHolmesPodPort(t *testing.T) {
 	argsFile := filepath.Join(dir, "helm-args")
 	command := exec.Command(makeVersion.Path, "--no-print-directory", "e2e-deploy")
 	command.Env = []string{
-		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"PATH=" + dir,
 		"DELIVERY_HELM_ARGS=" + argsFile,
 	}
 	if output, err := command.CombinedOutput(); err != nil {
